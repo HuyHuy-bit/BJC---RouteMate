@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user
+from app.api.deps import get_current_user, require_role
 from app.core.security import (
     create_access_token,
     create_refresh_token,
@@ -12,6 +12,7 @@ from app.core.security import (
     verify_password,
 )
 from app.db.session import get_db
+from app.models.enums import UserRole
 from app.models.user import User
 from app.schemas.user import RefreshRequest, TokenPair, UserLogin, UserOut, UserRegister
 
@@ -19,13 +20,16 @@ router = APIRouter(tags=["auth"])
 
 
 @router.post("/register", response_model=UserOut, status_code=status.HTTP_201_CREATED)
-def register(payload: UserRegister, db: Session = Depends(get_db)):
+def register(
+    payload: UserRegister,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.admin)),
+):
     """
-    TODO before real deployment: this is currently open to anyone, which is
-    fine for local dev bootstrapping (you need *some* way to create the
-    first admin account) but wrong for production. Lock this down so only
-    an authenticated admin can call it — e.g. require
-    Depends(require_role(UserRole.admin)) — once at least one admin exists.
+    Locked down to admins only — see docs/DATA_PROTECTION.md. This used to
+    be open so the very first admin account could be created with an
+    empty database; now that real admin accounts exist, only an
+    authenticated admin can create new staff accounts.
     """
     existing = db.query(User).filter(User.phone == payload.phone).first()
     if existing:

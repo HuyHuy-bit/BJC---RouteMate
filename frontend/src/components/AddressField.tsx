@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../lib/api";
 import type { GeocodeResult } from "../types";
+import MapView from "./MapView";
 
 interface Props {
   label: string;
@@ -93,9 +94,15 @@ export default function AddressField({ label, onSelect, selected }: Props) {
       )}
 
       {selected && (
-        <div className="text-xs mt-1" style={{ color: "var(--teal)" }}>
-          ✓ Đã chọn: {selected.formatted_address} ({selected.lat.toFixed(5)},{" "}
-          {selected.lng.toFixed(5)})
+        <div className="mt-2 space-y-1">
+          <div className="text-xs" style={{ color: "var(--teal)" }}>
+            ✓ Đã chọn: {selected.formatted_address} ({selected.lat.toFixed(5)},{" "}
+            {selected.lng.toFixed(5)})
+          </div>
+          <MapView
+            center={{ lat: selected.lat, lng: selected.lng }}
+            pins={[{ lat: selected.lat, lng: selected.lng }]}
+          />
         </div>
       )}
     </div>
