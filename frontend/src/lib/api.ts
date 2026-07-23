@@ -10,6 +10,9 @@ import type {
   TripStatus,
   UserOut,
   UserRole,
+  VehicleCreate,
+  VehicleOut,
+  VehicleUpdate,
 } from "../types";
 
 export const api = {
@@ -34,6 +37,13 @@ export const api = {
   },
   customers: {
     delete: (id: string) => apiClient.delete(`/customers/${id}`),
+  },
+  vehicles: {
+    list: () => apiClient.get<VehicleOut[]>("/vehicles").then((r) => r.data),
+    create: (payload: VehicleCreate) =>
+      apiClient.post<VehicleOut>("/vehicles", payload).then((r) => r.data),
+    update: (id: string, payload: VehicleUpdate) =>
+      apiClient.patch<VehicleOut>(`/vehicles/${id}`, payload).then((r) => r.data),
   },
   bookings: {
     list: (statusFilter?: BookingStatus) =>

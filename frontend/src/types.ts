@@ -1,12 +1,27 @@
 export type UserRole = "admin" | "dispatcher" | "driver";
-export type BookingStatus = "queued" | "matched" | "waiting" | "cancelled";
+export type BookingStatus =
+  | "queued"
+  | "matched"
+  | "waiting"
+  | "locked"
+  | "onboard"
+  | "completed"
+  | "no_show"
+  | "cancelled";
 export type BookingDirection = "outbound" | "return";
 export type TripStatus =
   | "forming"
-  | "confirmed"
+  | "sealed"
+  | "assigned"
   | "in_progress"
   | "completed"
-  | "cancelled";
+  | "cancelled"
+  | "reassigning";
+export type VehicleStatus =
+  | "available"
+  | "on_trip"
+  | "maintenance"
+  | "inactive";
 
 export interface UserOut {
   id: string;
@@ -89,4 +104,26 @@ export interface GeocodeResult {
 export interface GeocodeResponse {
   query: string;
   results: GeocodeResult[];
+}
+
+export interface VehicleOut {
+  id: string;
+  plate_number: string;
+  label: string | null;
+  seat_capacity: number;
+  status: VehicleStatus;
+  default_driver_id: string | null;
+}
+
+export interface VehicleCreate {
+  plate_number: string;
+  label?: string | null;
+  seat_capacity: number;
+  default_driver_id?: string | null;
+}
+
+export interface VehicleUpdate {
+  label?: string | null;
+  status?: VehicleStatus;
+  default_driver_id?: string | null;
 }

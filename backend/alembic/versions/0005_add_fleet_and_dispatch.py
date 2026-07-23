@@ -32,6 +32,34 @@ NEW_BOOKING_STATUSES = ["locked", "onboard", "completed", "no_show"]
 NEW_TRIP_STATUSES = ["sealed", "assigned", "reassigning"]
 
 
+def _table_exists(name: str) -> bool:
+    return sa.inspect(op.get_bind()).has_table(name)
+
+
+def _column_exists(table: str, column: str) -> bool:
+    insp = sa.inspect(op.get_bind())
+    if not insp.has_table(table):
+        return False
+    return column in {c["name"] for c in insp.get_columns(table)}
+
+
+def _index_exists(table: str, name: str) -> bool:
+    insp = sa.inspect(op.get_bind())
+    if not insp.has_table(table):
+        return False
+    return name in {i["name"] for i in insp.get_indexes(table)}
+
+
+def _safe_add_column(table: str, column: sa.Column) -> None:
+    if not _column_exists(table, column.name):
+        op.add_column(table, column)
+
+
+def _safe_create_index(name: str, table: str, cols: list, **kw) -> None:
+    if not _index_exists(table, name):
+        op.create_index(name, table, cols, **kw)
+
+
 def upgrade() -> None:
     bind = op.get_bind()
 
@@ -48,12 +76,15 @@ def upgrade() -> None:
     for value in NEW_TRIP_STATUSES:
         op.execute(f"ALTER TYPE trip_status ADD VALUE IF NOT EXISTS '{value}'")
 
-    vehicle_status = postgresql.ENUM(
+    # Create the types explicitly, then reference them with
+    # create_type=False below. Passing a "live" ENUM to create_table makes
+    # SQLAlchemy emit a second CREATE TYPE and fail with DuplicateObject.
+    postgresql.ENUM(
         "available", "on_trip", "maintenance", "inactive", name="vehicle_status"
-    )
-    vehicle_status.create(bind, checkfirst=True)
+    ).create(bind, checkfirst=True)
+    vehicle_status = postgresql.ENUM(name="vehicle_status", create_type=False)
 
-    dispatch_event_type = postgresql.ENUM(
+    postgresql.ENUM(
         "pool_created",
         "booking_pooled",
         "booking_removed",
@@ -67,11 +98,14 @@ def upgrade() -> None:
         "driver_rejected",
         "manual_override",
         name="dispatch_event_type",
+    ).create(bind, checkfirst=True)
+    dispatch_event_type = postgresql.ENUM(
+        name="dispatch_event_type", create_type=False
     )
-    dispatch_event_type.create(bind, checkfirst=True)
 
     # --- vehicles -----------------------------------------------------
-    op.create_table(
+    if not _table_exists("vehicles"):
+      op.create_table(
         "vehicles",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("plate_number", sa.String(20), nullable=False, unique=True),
@@ -93,12 +127,13 @@ def upgrade() -> None:
         ),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
         sa.Column("updated_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-    op.create_index("ix_vehicles_plate_number", "vehicles", ["plate_number"])
-    op.create_index("ix_vehicles_status", "vehicles", ["status"])
+      )
+    _safe_create_index("ix_vehicles_plate_number", "vehicles", ["plate_number"])
+    _safe_create_index("ix_vehicles_status", "vehicles", ["status"])
 
     # --- dispatch_events ----------------------------------------------
-    op.create_table(
+    if not _table_exists("dispatch_events"):
+      op.create_table(
         "dispatch_events",
         sa.Column("id", postgresql.UUID(as_uuid=True), primary_key=True),
         sa.Column("event_type", dispatch_event_type, nullable=False),
@@ -110,14 +145,14 @@ def upgrade() -> None:
         sa.Column("reason", sa.Text, nullable=True),
         sa.Column("details", postgresql.JSONB, nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now()),
-    )
-    op.create_index("ix_dispatch_events_event_type", "dispatch_events", ["event_type"])
-    op.create_index("ix_dispatch_events_trip_id", "dispatch_events", ["trip_id"])
-    op.create_index("ix_dispatch_events_booking_id", "dispatch_events", ["booking_id"])
-    op.create_index("ix_dispatch_events_created_at", "dispatch_events", ["created_at"])
+      )
+    _safe_create_index("ix_dispatch_events_event_type", "dispatch_events", ["event_type"])
+    _safe_create_index("ix_dispatch_events_trip_id", "dispatch_events", ["trip_id"])
+    _safe_create_index("ix_dispatch_events_booking_id", "dispatch_events", ["booking_id"])
+    _safe_create_index("ix_dispatch_events_created_at", "dispatch_events", ["created_at"])
 
     # --- trips: pool formation ----------------------------------------
-    op.add_column(
+    _safe_add_column(
         "trips",
         sa.Column(
             "vehicle_id",
@@ -126,16 +161,16 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.add_column(
+    _safe_add_column(
         "trips",
         sa.Column("direction", postgresql.ENUM(name="booking_direction", create_type=False), nullable=True),
     )
-    op.add_column(
+    _safe_add_column(
         "trips",
         sa.Column("departure_deadline", sa.DateTime(timezone=True), nullable=True),
     )
-    op.add_column("trips", sa.Column("sealed_at", sa.DateTime(timezone=True), nullable=True))
-    op.add_column(
+    _safe_add_column("trips", sa.Column("sealed_at", sa.DateTime(timezone=True), nullable=True))
+    _safe_add_column(
         "trips",
         sa.Column(
             "centroid",
@@ -143,17 +178,17 @@ def upgrade() -> None:
             nullable=True,
         ),
     )
-    op.add_column("trips", sa.Column("route_distance_meters", sa.Float, nullable=True))
-    op.add_column("trips", sa.Column("route_duration_seconds", sa.Float, nullable=True))
-    op.add_column("trips", sa.Column("route_geometry", sa.Text, nullable=True))
-    op.add_column("trips", sa.Column("route_is_estimate", sa.Boolean, nullable=True))
+    _safe_add_column("trips", sa.Column("route_distance_meters", sa.Float, nullable=True))
+    _safe_add_column("trips", sa.Column("route_duration_seconds", sa.Float, nullable=True))
+    _safe_add_column("trips", sa.Column("route_geometry", sa.Text, nullable=True))
+    _safe_add_column("trips", sa.Column("route_is_estimate", sa.Boolean, nullable=True))
 
-    op.create_index("ix_trips_status", "trips", ["status"])
-    op.create_index("ix_trips_direction", "trips", ["direction"])
-    op.create_index("ix_trips_departure_deadline", "trips", ["departure_deadline"])
+    _safe_create_index("ix_trips_status", "trips", ["status"])
+    _safe_create_index("ix_trips_direction", "trips", ["direction"])
+    _safe_create_index("ix_trips_departure_deadline", "trips", ["departure_deadline"])
     # GiST index on centroid is what makes the cheap candidate-pool
     # prefilter fast enough to run before any routing API call.
-    op.create_index(
+    _safe_create_index(
         "ix_trips_centroid", "trips", ["centroid"], postgresql_using="gist"
     )
 
@@ -179,17 +214,17 @@ def upgrade() -> None:
     op.alter_column("trips", "direction", nullable=False)
 
     # --- bookings: baselines + ETAs -----------------------------------
-    op.add_column("bookings", sa.Column("solo_duration_seconds", sa.Float, nullable=True))
-    op.add_column("bookings", sa.Column("solo_distance_meters", sa.Float, nullable=True))
-    op.add_column(
+    _safe_add_column("bookings", sa.Column("solo_duration_seconds", sa.Float, nullable=True))
+    _safe_add_column("bookings", sa.Column("solo_distance_meters", sa.Float, nullable=True))
+    _safe_add_column(
         "bookings",
         sa.Column("estimated_pickup_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.add_column(
+    _safe_add_column(
         "bookings",
         sa.Column("estimated_dropoff_at", sa.DateTime(timezone=True), nullable=True),
     )
-    op.create_index("ix_bookings_trip_id", "bookings", ["trip_id"])
+    _safe_create_index("ix_bookings_trip_id", "bookings", ["trip_id"])
 
     # --- overbooking guard --------------------------------------------
     # Application-level capacity checks lose to a race between two
@@ -231,6 +266,7 @@ def upgrade() -> None:
     )
     op.execute(
         """
+        DROP TRIGGER IF EXISTS trg_enforce_trip_capacity ON bookings;
         CREATE TRIGGER trg_enforce_trip_capacity
         BEFORE INSERT OR UPDATE OF trip_id ON bookings
         FOR EACH ROW EXECUTE FUNCTION enforce_trip_capacity();

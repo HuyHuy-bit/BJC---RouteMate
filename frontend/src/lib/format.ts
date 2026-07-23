@@ -1,4 +1,9 @@
-import type { BookingStatus, BookingDirection, TripStatus } from "../types";
+import type {
+  BookingStatus,
+  BookingDirection,
+  TripStatus,
+  VehicleStatus,
+} from "../types";
 
 export function fmtVnd(n: number): string {
   return n.toLocaleString("vi-VN") + "đ";
@@ -45,15 +50,31 @@ export const BOOKING_STATUS: Record<
   queued: { label: "Chờ ghép", tone: "neutral" },
   matched: { label: "Đã ghép xe", tone: "success" },
   waiting: { label: "Chưa đủ khách", tone: "warning" },
+  locked: { label: "Đã chốt xe", tone: "info" },
+  onboard: { label: "Đang trên xe", tone: "info" },
+  completed: { label: "Hoàn thành", tone: "success" },
+  no_show: { label: "Khách không đến", tone: "danger" },
   cancelled: { label: "Đã huỷ", tone: "danger" },
+};
+
+export const VEHICLE_STATUS: Record<
+  VehicleStatus,
+  { label: string; tone: Tone }
+> = {
+  available: { label: "Sẵn sàng", tone: "success" },
+  on_trip: { label: "Đang chạy", tone: "info" },
+  maintenance: { label: "Bảo dưỡng", tone: "warning" },
+  inactive: { label: "Ngừng hoạt động", tone: "neutral" },
 };
 
 export const TRIP_STATUS: Record<TripStatus, { label: string; tone: Tone }> = {
   forming: { label: "Đang gom khách", tone: "neutral" },
-  confirmed: { label: "Sẵn sàng chạy", tone: "info" },
+  sealed: { label: "Đã chốt, chờ xe", tone: "warning" },
+  assigned: { label: "Sẵn sàng chạy", tone: "info" },
   in_progress: { label: "Đang chạy", tone: "warning" },
   completed: { label: "Hoàn thành", tone: "success" },
   cancelled: { label: "Đã huỷ", tone: "danger" },
+  reassigning: { label: "Đang đổi xe", tone: "danger" },
 };
 
 export const DIRECTION: Record<BookingDirection, { label: string; short: string }> = {
@@ -65,6 +86,7 @@ export const DIRECTION: Record<BookingDirection, { label: string; short: string 
 export const NEXT_TRIP_ACTION: Partial<
   Record<TripStatus, { label: string; next: TripStatus }>
 > = {
-  confirmed: { label: "Bắt đầu chuyến", next: "in_progress" },
+  sealed: { label: "Xác nhận xe", next: "assigned" },
+  assigned: { label: "Bắt đầu chuyến", next: "in_progress" },
   in_progress: { label: "Hoàn thành chuyến", next: "completed" },
 };

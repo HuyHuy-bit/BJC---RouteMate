@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { LogOut, UserPlus } from "lucide-react";
+import { Car, LogOut, UserPlus } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import Button from "../ui/Button";
 
@@ -10,11 +10,6 @@ const ROLE_LABEL: Record<string, string> = {
   driver: "Tài xế",
 };
 
-/**
- * One shell for every authenticated screen. Previously each page
- * re-implemented its own header markup, so the logo, spacing, and
- * logout button drifted apart between them.
- */
 export default function AppShell({
   title,
   subtitle,
@@ -56,14 +51,28 @@ export default function AppShell({
             </Link>
 
             <div className="flex items-center gap-2 shrink-0">
+              {(user?.role === "admin" || user?.role === "dispatcher") && (
+                <Link to="/fleet" aria-label="Đội xe">
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    iconLeft={<Car size={14} aria-hidden="true" />}
+                    className="!px-2 sm:!px-2.5"
+                  >
+                    <span className="hidden sm:inline">Đội xe</span>
+                  </Button>
+                </Link>
+              )}
+
               {user?.role === "admin" && (
-                <Link to="/admin/users/new" className="hidden sm:block">
+                <Link to="/admin/users/new" aria-label="Thêm nhân viên">
                   <Button
                     variant="ghost"
                     size="sm"
                     iconLeft={<UserPlus size={14} aria-hidden="true" />}
+                    className="!px-2 sm:!px-2.5"
                   >
-                    Thêm nhân viên
+                    <span className="hidden sm:inline">Thêm nhân viên</span>
                   </Button>
                 </Link>
               )}

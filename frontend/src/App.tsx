@@ -9,6 +9,7 @@ import type { UserRole } from "./types";
 const DispatchBoard = lazy(() => import("./pages/DispatchBoard"));
 const DriverDashboard = lazy(() => import("./pages/DriverDashboard"));
 const CreateUserPage = lazy(() => import("./pages/CreateUserPage"));
+const FleetPage = lazy(() => import("./pages/FleetPage"));
 
 function FullPageLoader() {
   return (
@@ -64,6 +65,14 @@ export default function App() {
           element={
             <ProtectedRoute allow={["admin"]}>
               <CreateUserPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/fleet"
+          element={
+            <ProtectedRoute allow={["admin", "dispatcher"]}>
+              <FleetPage />
             </ProtectedRoute>
           }
         />
