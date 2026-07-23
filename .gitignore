@@ -1,0 +1,27 @@
+# secrets
+.env
+*.pem
+*.key
+
+# python
+__pycache__/
+*.pyc
+.venv/
+venv/
+*.egg-info/
+
+# node
+node_modules/
+dist/
+.vite/
+
+# docker
+docker-compose.override.yml
+
+# editors
+.vscode/
+.idea/
+*.swp
+
+# os
+.DS_Store

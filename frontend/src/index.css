@@ -1,0 +1,23 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --ink: #1c2333;
+  --paper: #f6f1e7;
+  --paper-dim: #ece5d5;
+  --line: #d8cfb8;
+  --amber: #c97a2b;
+  --teal: #2b5e52;
+  --coral: #b24435;
+  --mute: #8a8371;
+}
+
+body {
+  margin: 0;
+  font-family: "Inter", sans-serif;
+  background: var(--paper);
+  color: var(--ink);
+}
