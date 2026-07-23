@@ -1,7 +1,15 @@
 # Xe Ghép — Bắc Giang ⇄ Hà Nội Dispatch System
 
+Hello — I created this software with the hope of helping reduce costs for
+ride-sharing businesses, an industry that's very popular in the Vietnamese
+market. This software is still in beta but will be released to the market
+soon. It helps businesses find customers and supports matching them based
+on logic that optimizes for distance and cost.
+
 Internal dispatch platform for grouping door-to-door ride bookings into shared
 4-seater trips, based on real proximity of pickup/dropoff points.
+
+This is an Internal dispatch platform for grouping door-to-door ride bookings into shared 4-seater trips, based on real proximity of pickup/dropoff points.
 
 ## Stack
 
