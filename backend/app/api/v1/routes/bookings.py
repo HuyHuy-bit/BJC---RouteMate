@@ -1,3 +1,4 @@
+import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
@@ -14,6 +15,8 @@ from app.services.booking_service import create_booking, to_booking_out
 from app.services.customer_service import get_or_create_customer
 from app.services.dispatch_service import assign_booking
 
+logger = logging.getLogger(__name__)
+
 router = APIRouter(tags=["bookings"])
 
 
@@ -26,12 +29,6 @@ def create_booking_route(
     customer = get_or_create_customer(db, payload.customer)
     booking = create_booking(db, customer, payload)
 
-    # Match immediately rather than waiting for a human to trigger a
-    # batch run. This is what makes pooling continuous: the booking is
-    # offered to every compatible forming pool right now, and only opens
-    # a new car if none of them fit.
-    assign_booking(db, booking)
-
     log_pii_access(
         db,
         actor_user_id=current_user.id,
@@ -39,7 +36,26 @@ def create_booking_route(
         target_type="customer",
         target_id=customer.id,
     )
+
+    # Persist the booking FIRST. Matching used to run inside this
+    # transaction, which meant any failure in routing or pool insertion
+    # threw away the customer's booking entirely — the one thing that
+    # must never be lost. Now a matching failure leaves the booking
+    # safely `queued`, and the scheduled dispatch cycle picks it up on
+    # the next tick.
     db.commit()
+    db.refresh(booking)
+
+    try:
+        assign_booking(db, booking)
+        db.commit()
+    except Exception:
+        logger.exception(
+            "matching failed for booking %s; left queued for the dispatch cycle",
+            booking.id,
+        )
+        db.rollback()
+
     db.refresh(booking)
     return to_booking_out(booking)
 

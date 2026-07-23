@@ -3,6 +3,7 @@ import { Check, Loader2, MapPin, Search } from "lucide-react";
 import { api } from "../lib/api";
 import type { GeocodeResult } from "../types";
 import Button from "./ui/Button";
+import { getErrorMessage } from "../lib/errors";
 
 interface Props {
   label: string;
@@ -43,7 +44,7 @@ export default function AddressField({
       setResults(res.results);
     } catch (err: any) {
       setError(
-        err?.response?.data?.detail ?? "Không tìm được địa chỉ. Kiểm tra kết nối."
+        getErrorMessage(err, "Không tìm được địa chỉ. Kiểm tra kết nối.")
       );
     } finally {
       setLoading(false);

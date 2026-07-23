@@ -44,6 +44,7 @@ export const api = {
       apiClient.post<VehicleOut>("/vehicles", payload).then((r) => r.data),
     update: (id: string, payload: VehicleUpdate) =>
       apiClient.patch<VehicleOut>(`/vehicles/${id}`, payload).then((r) => r.data),
+    delete: (id: string) => apiClient.delete(`/vehicles/${id}`),
   },
   bookings: {
     list: (statusFilter?: BookingStatus) =>

@@ -28,7 +28,11 @@ class Trip(Base, TimestampMixin):
     )
 
     direction: Mapped[BookingDirection] = mapped_column(
-        Enum(BookingDirection, name="booking_direction"), index=True
+        Enum(
+            BookingDirection,
+            name="booking_direction",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        ), index=True
     )
     status: Mapped[TripStatus] = mapped_column(
         Enum(TripStatus, name="trip_status"),

@@ -78,8 +78,16 @@ def classify_direction(
     classification and could group a passenger with a car driving the
     opposite way. Comparing pickup and dropoff projections is robust
     anywhere on the corridor, including outside the two endpoints.
+
+    Business meaning (this was inverted in an earlier version — a
+    Bắc Giang -> Hà Nội booking was misclassified as "return" and
+    displayed backwards on every screen):
+      outbound = leaving the home base (Bắc Giang -> Hà Nội / away)
+      return   = heading back to the home base (-> Bắc Giang)
+    _corridor_position() returns ~1.0 near Bắc Giang, ~0.0 near Hà Nội.
+    So moving TOWARD Bắc Giang (dropoff projection > pickup projection)
+    is the RETURN leg, not outbound.
     """
     start = _corridor_position(pickup_lat, pickup_lng)
     end = _corridor_position(dropoff_lat, dropoff_lng)
-    # Moving toward Bắc Giang (increasing projection) == outbound.
-    return "outbound" if end >= start else "return"
+    return "return" if end >= start else "outbound"

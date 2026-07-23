@@ -22,6 +22,17 @@ PICKUP_WINDOW_MINUTES = 45
 MAX_POOL_WAIT_MINUTES = 45
 PEAK_POOL_WAIT_MINUTES = 20
 
+# --- Return-leg vehicle reuse ---
+# A vehicle finishing its outbound run is treated as a candidate for a
+# return booking instead of always dispatching (or waiting for) a
+# separate car — the van is going back to base regardless. These bound
+# how good a fit has to be time-wise: too late and the customer waits
+# past their requested pickup; too early and the vehicle would sit idle
+# for an unreasonable stretch rather than this being a genuine "already
+# heading that way" match.
+RETURN_VEHICLE_LATE_TOLERANCE_MINUTES = 15
+RETURN_VEHICLE_MATCH_WINDOW_MINUTES = 60
+
 # --- Per-passenger service guarantee ---
 # No passenger may spend more than this many minutes longer in the car
 # than they would have on a direct solo trip. This is a PASSENGER

@@ -9,6 +9,7 @@ import Card from "./ui/Card";
 import EmptyState from "./ui/EmptyState";
 import Skeleton from "./ui/Skeleton";
 import { useToast } from "./ui/Toast";
+import { getErrorMessage } from "../lib/errors";
 
 export default function TripsPanel({
   trips,
@@ -45,7 +46,7 @@ export default function TripsPanel({
       toast(`${label} — đã cập nhật.`, "success");
       refresh();
     } catch (err: any) {
-      toast(err?.response?.data?.detail ?? "Không cập nhật được chuyến.", "error");
+      toast(getErrorMessage(err, "Không cập nhật được chuyến."), "error");
     }
   };
 

@@ -8,6 +8,7 @@ import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import Field from "../components/ui/Field";
 import { useToast } from "../components/ui/Toast";
+import { getErrorMessage } from "../lib/errors";
 
 const ROLES: {
   value: UserRole;
@@ -61,7 +62,7 @@ export default function CreateUserPage() {
       setPassword("");
       setRole("dispatcher");
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? "Không tạo được tài khoản.");
+      setError(getErrorMessage(err, "Không tạo được tài khoản."));
     } finally {
       setSubmitting(false);
     }

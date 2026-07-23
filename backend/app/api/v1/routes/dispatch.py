@@ -6,9 +6,10 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.booking import Booking
-from app.models.enums import TripStatus, UserRole
+from app.models.enums import TripStatus, UserRole, VehicleStatus
 from app.models.trip import Trip
 from app.models.user import User
+from app.models.vehicle import Vehicle
 from app.schemas.trip import (
     MatchingRunResult,
     TripAssignDriver,
@@ -182,6 +183,37 @@ def update_trip_status(
         )
 
     trip.status = payload.status
+
+    # A completed or cancelled trip releases its vehicle. Without this, a
+    # vehicle stays marked on_trip forever after finishing, which means
+    # it can never be picked for the next outbound run OR offered as a
+    # returning vehicle for someone else's return leg — silently shrinking
+    # the usable fleet over the course of a day.
+    if (
+        payload.status in (TripStatus.completed, TripStatus.cancelled)
+        and trip.vehicle_id is not None
+    ):
+        still_committed = (
+            db.query(Trip)
+            .filter(Trip.vehicle_id == trip.vehicle_id)
+            .filter(Trip.id != trip.id)
+            .filter(
+                Trip.status.in_(
+                    [
+                        TripStatus.sealed,
+                        TripStatus.assigned,
+                        TripStatus.in_progress,
+                        TripStatus.reassigning,
+                    ]
+                )
+            )
+            .first()
+        )
+        if still_committed is None:
+            vehicle = db.get(Vehicle, trip.vehicle_id)
+            if vehicle is not None and vehicle.status == VehicleStatus.on_trip:
+                vehicle.status = VehicleStatus.available
+
     db.commit()
     db.refresh(trip)
     return _to_trip_out(trip)

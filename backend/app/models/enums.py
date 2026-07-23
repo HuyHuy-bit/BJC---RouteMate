@@ -8,8 +8,8 @@ class UserRole(str, enum.Enum):
 
 
 class BookingDirection(str, enum.Enum):
-    outbound = "outbound"  # toward Bắc Giang
-    return_leg = "return"  # toward Hà Nội
+    outbound = "outbound"    # leaving the home base: Bắc Giang -> Hà Nội
+    return_leg = "return"    # heading back to base: Hà Nội -> Bắc Giang
 
 
 class BookingStatus(str, enum.Enum):

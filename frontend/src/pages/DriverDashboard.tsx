@@ -9,6 +9,7 @@ import Card from "../components/ui/Card";
 import EmptyState from "../components/ui/EmptyState";
 import Skeleton from "../components/ui/Skeleton";
 import { useToast } from "../components/ui/Toast";
+import { getErrorMessage } from "../lib/errors";
 import {
   DIRECTION,
   NEXT_TRIP_ACTION,
@@ -34,7 +35,7 @@ export default function DriverDashboard() {
       toast(`${label} — đã cập nhật.`, "success");
       refresh();
     } catch (err: any) {
-      toast(err?.response?.data?.detail ?? "Không cập nhật được chuyến.", "error");
+      toast(getErrorMessage(err, "Không cập nhật được chuyến."), "error");
     }
   };
 

@@ -58,7 +58,11 @@ class Booking(Base, TimestampMixin):
     price_vnd: Mapped[int] = mapped_column(Integer, default=0)
     requested_pickup_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     direction: Mapped[BookingDirection] = mapped_column(
-        Enum(BookingDirection, name="booking_direction")
+        Enum(
+            BookingDirection,
+            name="booking_direction",
+            values_callable=lambda enum_cls: [e.value for e in enum_cls],
+        )
     )
 
     status: Mapped[BookingStatus] = mapped_column(

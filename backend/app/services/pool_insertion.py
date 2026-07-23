@@ -19,7 +19,7 @@ Two things here that the previous implementation could not do at all:
 """
 
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from itertools import permutations
 from uuid import UUID
 
@@ -78,6 +78,24 @@ class InsertionResult:
     is_estimate: bool = False
 
 
+
+def _as_utc(dt: datetime) -> datetime:
+    """
+    Normalizes any datetime to timezone-aware UTC.
+
+    Postgres `timestamptz` columns can come back either aware or naive
+    depending on driver and session settings, and mixing the two raises
+    `TypeError: can't subtract offset-naive and offset-aware datetimes`
+    the moment a stored booking is compared against a fresh
+    `datetime.now(timezone.utc)`. Normalizing at every boundary is the
+    only reliable fix — every comparison in this module goes through
+    here first.
+    """
+    if dt.tzinfo is None:
+        return dt.replace(tzinfo=timezone.utc)
+    return dt.astimezone(timezone.utc)
+
+
 def compute_solo_baseline(pickup: Coord, dropoff: Coord) -> float:
     """
     A booking's direct point-to-point ride time, in seconds.
@@ -97,7 +115,9 @@ def compute_solo_baseline(pickup: Coord, dropoff: Coord) -> float:
 
 
 def _windows_overlap(a: datetime, b: datetime) -> bool:
-    return abs((a - b).total_seconds()) <= PICKUP_WINDOW_MINUTES * 60
+    return abs(
+        (_as_utc(a) - _as_utc(b)).total_seconds()
+    ) <= PICKUP_WINDOW_MINUTES * 60
 
 
 def _valid_orderings(members: list[PoolMember]):
@@ -149,7 +169,7 @@ def evaluate_insertion(
     Evaluates adding `candidate` to a pool already holding `members`.
     Returns feasibility plus a 0..1 score where LOWER is better.
     """
-    now = now or datetime.now(tz=candidate.requested_pickup_at.tzinfo)
+    now = _as_utc(now or datetime.now(timezone.utc))
 
     # ---- Stage 1: free rejects -------------------------------------
     if len(members) >= MAX_PASSENGERS:
@@ -246,12 +266,15 @@ def evaluate_insertion(
     detour_term = min(1.0, worst_detour / MAX_PASSENGER_DETOUR_MINUTES)
 
     wait_seconds = abs(
-        (candidate.requested_pickup_at - min(m.requested_pickup_at for m in everyone)).total_seconds()
+        (
+            _as_utc(candidate.requested_pickup_at)
+            - min(_as_utc(m.requested_pickup_at) for m in everyone)
+        ).total_seconds()
     )
     wait_term = min(1.0, wait_seconds / (PICKUP_WINDOW_MINUTES * 60))
 
     if departure_deadline:
-        remaining = (departure_deadline - now).total_seconds()
+        remaining = (_as_utc(departure_deadline) - now).total_seconds()
         # Closer to deadline == more urgent to fill == better score.
         deadline_term = max(0.0, min(1.0, remaining / (PICKUP_WINDOW_MINUTES * 60)))
     else:

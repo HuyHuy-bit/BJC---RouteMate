@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Car, Plus } from "lucide-react";
+import { ArrowLeft, Car, Plus, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
 import { VEHICLE_STATUS } from "../lib/format";
 import type { VehicleOut, VehicleStatus } from "../types";
@@ -9,11 +9,13 @@ import AppShell from "../components/layout/AppShell";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
+import ConfirmDialog from "../components/ui/ConfirmDialog";
 import EmptyState from "../components/ui/EmptyState";
 import Field from "../components/ui/Field";
 import Skeleton from "../components/ui/Skeleton";
 import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
+import { getErrorMessage } from "../lib/errors";
 
 const STATUS_OPTIONS: VehicleStatus[] = [
   "available",
@@ -57,6 +59,23 @@ export default function FleetPage() {
       refresh();
     },
     onError: () => toast("Không gán được tài xế.", "error"),
+  });
+
+  const [pendingDelete, setPendingDelete] = useState<VehicleOut | null>(null);
+  const deleteVehicle = useMutation({
+    mutationFn: (id: string) => api.vehicles.delete(id),
+    onSuccess: () => {
+      toast(`Đã xoá xe ${pendingDelete?.plate_number}.`, "success");
+      setPendingDelete(null);
+      refresh();
+    },
+    onError: (err) => {
+      // A 409 here means the car is actively out on a trip -- the
+      // backend refuses to delete a vehicle real passengers depend on
+      // right now, so surface exactly why rather than a generic failure.
+      toast(getErrorMessage(err, "Không xoá được xe."), "error");
+      setPendingDelete(null);
+    },
   });
 
   const vehicles = vehiclesQuery.data ?? [];
@@ -122,9 +141,20 @@ export default function FleetPage() {
             onDriverChange={(driverId) =>
               assignDriver.mutate({ id: v.id, driverId })
             }
+            onDelete={() => setPendingDelete(v)}
           />
         ))}
       </div>
+
+      <ConfirmDialog
+        open={pendingDelete !== null}
+        title={`Xoá xe ${pendingDelete?.plate_number ?? ""}?`}
+        description="Xe sẽ bị xoá khỏi đội xe. Các chuyến đã hoàn thành hoặc đã huỷ liên quan đến xe này vẫn được giữ lại, chỉ mất liên kết với xe. Nếu xe đang chạy chuyến, thao tác này sẽ bị từ chối."
+        confirmLabel="Xoá xe"
+        loading={deleteVehicle.isPending}
+        onConfirm={() => pendingDelete && deleteVehicle.mutate(pendingDelete.id)}
+        onCancel={() => setPendingDelete(null)}
+      />
 
       <SlideOver
         open={formOpen}
@@ -148,11 +178,13 @@ function VehicleRow({
   drivers,
   onStatusChange,
   onDriverChange,
+  onDelete,
 }: {
   vehicle: VehicleOut;
   drivers: { id: string; full_name: string }[];
   onStatusChange: (s: VehicleStatus) => void;
   onDriverChange: (driverId: string | null) => void;
+  onDelete: () => void;
 }) {
   const status = VEHICLE_STATUS[vehicle.status];
   return (
@@ -169,6 +201,15 @@ function VehicleRow({
             {vehicle.label ?? "Chưa đặt tên"} · {vehicle.seat_capacity} chỗ
           </p>
         </div>
+        <Button
+          variant="danger-subtle"
+          size="sm"
+          onClick={onDelete}
+          aria-label={`Xoá xe ${vehicle.plate_number}`}
+          className="!px-1.5 shrink-0"
+        >
+          <Trash2 size={14} aria-hidden="true" />
+        </Button>
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">
@@ -235,7 +276,7 @@ function VehicleForm({ onCreated }: { onCreated: () => void }) {
       setSeats(4);
       onCreated();
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? "Không thêm được xe.");
+      setError(getErrorMessage(err, "Không thêm được xe."));
     } finally {
       setSubmitting(false);
     }

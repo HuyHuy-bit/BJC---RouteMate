@@ -7,6 +7,7 @@ import Field from "./ui/Field";
 import MapView, { MAP_COLORS } from "./MapView";
 import AddressField from "./AddressField";
 import { useToast } from "./ui/Toast";
+import { getErrorMessage } from "../lib/errors";
 
 const PICKUP_COLOR = MAP_COLORS.pickup;
 const DROPOFF_COLOR = MAP_COLORS.dropoff;
@@ -61,7 +62,7 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
       onCreated();
     } catch (err: any) {
       toast(
-        err?.response?.data?.detail ?? "Không thêm được khách. Thử lại.",
+        getErrorMessage(err, "Không thêm được khách. Thử lại."),
         "error"
       );
     } finally {

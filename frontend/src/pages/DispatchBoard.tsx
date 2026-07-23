@@ -12,6 +12,7 @@ import Card from "../components/ui/Card";
 import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
 import { fmtVnd } from "../lib/format";
+import { getErrorMessage } from "../lib/errors";
 
 // Fixed rather than dispatcher-adjustable — 15km covers this business's
 // service area without putting a technical knob in an operational UI.
@@ -81,7 +82,7 @@ export default function DispatchBoard() {
       );
       refreshAll();
     } catch (err: any) {
-      toast(err?.response?.data?.detail ?? "Không ghép được chuyến.", "error");
+      toast(getErrorMessage(err, "Không ghép được chuyến."), "error");
     } finally {
       setRunning(false);
     }

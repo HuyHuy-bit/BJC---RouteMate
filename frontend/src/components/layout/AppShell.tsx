@@ -10,6 +10,11 @@ const ROLE_LABEL: Record<string, string> = {
   driver: "Tài xế",
 };
 
+/**
+ * One shell for every authenticated screen. Previously each page
+ * re-implemented its own header markup, so the logo, spacing, and
+ * logout button drifted apart between them.
+ */
 export default function AppShell({
   title,
   subtitle,
@@ -59,6 +64,9 @@ export default function AppShell({
                     iconLeft={<Car size={14} aria-hidden="true" />}
                     className="!px-2 sm:!px-2.5"
                   >
+                    {/* Label collapses on narrow screens rather than the
+                        whole control disappearing — a button you cannot
+                        reach on a phone may as well not exist. */}
                     <span className="hidden sm:inline">Đội xe</span>
                   </Button>
                 </Link>
