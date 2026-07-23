@@ -113,19 +113,26 @@ export default function DriverDashboard() {
           className="flex justify-between items-end mb-5 pb-3 border-b-2"
           style={{ borderColor: "var(--ink)" }}
         >
-          <div>
-            <div
-              className="text-xs tracking-widest mb-1"
-              style={{ color: "var(--amber)", fontFamily: "'JetBrains Mono', monospace" }}
-            >
-              TÀI XẾ
+          <div className="flex items-center gap-2">
+            <img
+              src="/bjc-logo.jpg"
+              alt="BJC Group"
+              className="w-9 h-9 rounded-full object-cover"
+            />
+            <div>
+              <div
+                className="text-xs tracking-widest mb-1"
+                style={{ color: "var(--coral)", fontFamily: "'JetBrains Mono', monospace" }}
+              >
+                THÀNH CÔNG · TÀI XẾ
+              </div>
+              <h1
+                className="text-xl font-bold"
+                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+              >
+                {user?.full_name}
+              </h1>
             </div>
-            <h1
-              className="text-xl font-bold"
-              style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-            >
-              {user?.full_name}
-            </h1>
           </div>
           <button
             onClick={logout}

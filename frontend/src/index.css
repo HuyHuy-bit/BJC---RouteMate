@@ -4,15 +4,25 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Brand palette pulled from the actual BJC Group logo (blue ring, red
+  wordmark, dark green Vietnam map) and the Thành Công fleet livery
+  (white body, red/orange accent stripe). Variable NAMES are kept the
+  same as the original placeholder theme on purpose — every component
+  references these custom properties instead of hardcoded hex values, so
+  changing what they point to re-themes the whole app without touching
+  component files.
+*/
 :root {
-  --ink: #1c2333;
-  --paper: #f6f1e7;
-  --paper-dim: #ece5d5;
-  --line: #d8cfb8;
-  --amber: #c97a2b;
-  --teal: #2b5e52;
-  --coral: #b24435;
-  --mute: #8a8371;
+  --ink: #16213a;       /* dark navy-black, was neutral ink */
+  --paper: #f4f6f9;      /* clean cool white, was warm cream */
+  --paper-dim: #e7ebf1;
+  --line: #d8dfe8;
+  --amber: #d6331f;      /* now brand red -- primary actions/accents */
+  --teal: #1f7a4d;       /* success/matched -- green, echoes the logo's map */
+  --coral: #a31e17;      /* danger/private -- darker red, distinct from amber */
+  --mute: #6b7280;
+  --brand-blue: #1b5fa8; /* logo ring blue -- header/secondary accents */
 }
 
 body {

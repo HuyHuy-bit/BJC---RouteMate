@@ -48,19 +48,26 @@ export default function DispatchBoard() {
           className="flex justify-between items-end mb-6 pb-3 border-b-2"
           style={{ borderColor: "var(--ink)" }}
         >
-          <div>
-            <div
-              className="text-xs tracking-widest mb-1"
-              style={{ color: "var(--amber)", fontFamily: "'JetBrains Mono', monospace" }}
-            >
-              BẢNG ĐIỀU PHỐI · NỘI BỘ
+          <div className="flex items-center gap-3">
+            <img
+              src="/bjc-logo.jpg"
+              alt="BJC Group"
+              className="w-10 h-10 rounded-full object-cover"
+            />
+            <div>
+              <div
+                className="text-xs tracking-widest mb-1"
+                style={{ color: "var(--coral)", fontFamily: "'JetBrains Mono', monospace" }}
+              >
+                THÀNH CÔNG LIMOUSINE · BJC GROUP
+              </div>
+              <h1
+                className="text-2xl font-bold"
+                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+              >
+                Bảng điều phối · Bắc Giang ⇄ Hà Nội
+              </h1>
             </div>
-            <h1
-              className="text-2xl font-bold"
-              style={{ fontFamily: "'Space Grotesk', sans-serif" }}
-            >
-              Bắc Giang ⇄ Hà Nội
-            </h1>
           </div>
           <div className="text-right text-sm">
             <div style={{ color: "var(--mute)" }}>{user?.full_name}</div>
