@@ -1,17 +1,21 @@
 """
-The matching algorithm — greedy clustering, same overall shape as before,
-but the acceptance criterion and stop ordering now come from a real route
-solver (app/services/route_solver.py) instead of raw pickup/dropoff
-proximity.
+The matching algorithm — greedy clustering using a real route solver for
+grouping decisions and stop ordering (see route_solver.py), grouped by
+requested pickup date AND direction.
 
-Why this is better than the old "sum of two straight-line distances"
-approach: two riders can have a close pickup AND a close dropoff while
-still being a bad match if combining them requires the car to backtrack.
-Marginal *route insertion cost* — how much longer does the group's actual
-optimal route get by adding this rider — is a direct measure of what
-actually matters: does sharing raise the total distance/cost driven. No
-external API calls; still pure geometry (haversine), just organized
-around real route geometry instead of point-to-point distance.
+Direction matters for a business reason, not just a geographic one: every
+van that drives Bắc Giang -> Hà Nội returns the same day regardless of
+whether it's carrying a paying customer (small fleet, fixed base). That
+means:
+  - Outbound bookings still need 2+ riders to justify running the trip
+    (the original business rule — filling seats is what makes an
+    outbound trip worth it).
+  - Return-leg bookings should be scheduled even solo — the van is
+    driving back either way, so there's no "is this worth running"
+    threshold on the way home, only a seat-capacity ceiling (4).
+This is NOT a pricing change (same price both directions, per the
+business's own choice) — it only affects whether a single unmatched
+rider counts as "waiting" or as a confirmed trip.
 """
 
 from collections import defaultdict
@@ -20,12 +24,17 @@ from uuid import UUID
 from sqlalchemy.orm import Session
 
 from app.models.booking import Booking
-from app.models.enums import BookingStatus, TripStatus
+from app.models.enums import BookingDirection, BookingStatus, TripStatus
 from app.models.trip import Trip
-from app.services.geo import Candidate, haversine_m  # noqa: F401 (haversine_m re-exported for callers/tests)
+from app.services.geo import Candidate, haversine_m  # noqa: F401
 from app.services.route_solver import best_route, pickup_order_ranks
 
 MAX_SEATS = 4
+
+MIN_GROUP_SIZE = {
+    BookingDirection.outbound: 2,
+    BookingDirection.return_leg: 1,
+}
 
 
 def cluster(candidates: list[Candidate], max_detour_meters: float) -> list[list[UUID]]:
@@ -34,8 +43,6 @@ def cluster(candidates: list[Candidate], max_detour_meters: float) -> list[list[
     then repeatedly add whichever remaining candidate raises the group's
     optimal route distance the LEAST (marginal insertion cost), as long as
     that increase stays within max_detour_meters. Stops at 4 seats.
-    Returns a list of groups (lists of booking ids); a group of size 1
-    means "no match found this run."
     """
     pool = list(candidates)
     groups: list[list[UUID]] = []
@@ -71,13 +78,10 @@ def cluster(candidates: list[Candidate], max_detour_meters: float) -> list[list[
 
 def run_matching(db: Session, radius_meters: float = 3000) -> list[Trip]:
     """
-    Executes one matching pass over all `queued` bookings and returns the
-    Trip rows created this run. `radius_meters` is the max acceptable
-    detour (in meters) that adding one more rider is allowed to add to a
-    car's total route — same parameter name/units as before so the API
-    and frontend didn't need to change, but its meaning is now "max added
-    detour," not "clustering radius." Caller is responsible for commit —
-    this only flushes so generated ids are available.
+    Executes one matching pass over all `queued` bookings. `radius_meters`
+    is the max acceptable added detour (meters) for grouping — same
+    parameter as before. Caller is responsible for commit — this only
+    flushes so generated ids are available.
     """
     from geoalchemy2.shape import to_shape
 
@@ -99,24 +103,27 @@ def run_matching(db: Session, radius_meters: float = 3000) -> list[Trip]:
 
     by_id = {b.id: b for b in shared}
 
-    # Group by requested pickup date first — a booking for tomorrow must
-    # never be clustered with one for today, no matter how close the
-    # pickup points are.
-    by_date: dict = defaultdict(list)
+    # Group by (date, direction) — different dates never mix, and
+    # outbound/return legs never mix either (they're geographically
+    # opposite anyway, but grouping explicitly also lets the two
+    # directions use different minimum-group rules below).
+    by_bucket: dict = defaultdict(list)
     for b in shared:
-        by_date[b.requested_pickup_at.date()].append(b)
+        by_bucket[(b.requested_pickup_at.date(), b.direction)].append(b)
 
-    for _date, bookings_on_date in by_date.items():
+    for (_date, direction), bookings_in_bucket in by_bucket.items():
         candidates = []
-        for b in bookings_on_date:
+        for b in bookings_in_bucket:
             p = to_shape(b.pickup_point)
             d = to_shape(b.dropoff_point)
             candidates.append(Candidate(b.id, p.y, p.x, d.y, d.x))
 
+        min_size = MIN_GROUP_SIZE[direction]
+
         for group_ids in cluster(candidates, radius_meters):
-            if len(group_ids) < 2:
-                lone = by_id[group_ids[0]]
-                lone.status = BookingStatus.waiting
+            if len(group_ids) < min_size:
+                for bid in group_ids:
+                    by_id[bid].status = BookingStatus.waiting
                 continue
 
             trip = Trip(status=TripStatus.confirmed)

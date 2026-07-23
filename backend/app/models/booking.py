@@ -8,7 +8,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
 from app.db.types import EncryptedString
-from app.models.enums import BookingStatus
+from app.models.enums import BookingDirection, BookingStatus
 
 
 class Booking(Base, TimestampMixin):
@@ -57,6 +57,9 @@ class Booking(Base, TimestampMixin):
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
     price_vnd: Mapped[int] = mapped_column(Integer, default=0)
     requested_pickup_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    direction: Mapped[BookingDirection] = mapped_column(
+        Enum(BookingDirection, name="booking_direction")
+    )
 
     status: Mapped[BookingStatus] = mapped_column(
         Enum(BookingStatus, name="booking_status"), default=BookingStatus.queued

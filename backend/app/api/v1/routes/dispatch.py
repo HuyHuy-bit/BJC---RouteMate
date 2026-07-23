@@ -21,8 +21,6 @@ from app.services.matching import run_matching
 
 router = APIRouter(tags=["dispatch"])
 
-# Only these forward transitions are allowed — no skipping steps, no going
-# backwards. Any role-appropriate caller can cancel from most states.
 ALLOWED_TRANSITIONS: dict[TripStatus, set[TripStatus]] = {
     TripStatus.forming: {TripStatus.confirmed, TripStatus.cancelled},
     TripStatus.confirmed: {TripStatus.in_progress, TripStatus.cancelled},
@@ -101,6 +99,7 @@ def list_trips(
     trips = (
         db.query(Trip)
         .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .filter(Trip.bookings.any())
         .order_by(Trip.created_at.desc())
         .all()
     )
@@ -117,6 +116,7 @@ def my_trips(
         .options(joinedload(Trip.bookings).joinedload(Booking.customer))
         .filter(Trip.driver_id == current_user.id)
         .filter(Trip.status.in_([TripStatus.confirmed, TripStatus.in_progress]))
+        .filter(Trip.bookings.any())
         .order_by(Trip.created_at.asc())
         .all()
     )

@@ -7,6 +7,11 @@ class UserRole(str, enum.Enum):
     driver = "driver"
 
 
+class BookingDirection(str, enum.Enum):
+    outbound = "outbound"  # Bắc Giang -> Hà Nội (or other destination)
+    return_leg = "return"  # Hà Nội -> Bắc Giang
+
+
 class BookingStatus(str, enum.Enum):
     queued = "queued"       # waiting to be matched
     matched = "matched"     # assigned to a trip with 2+ riders, or private

@@ -5,8 +5,10 @@ from sqlalchemy.orm import Session
 from app.core.pricing import price_for
 from app.models.booking import Booking
 from app.models.customer import Customer
+from app.models.enums import BookingDirection
 from app.schemas.booking import BookingCreate, BookingOut
 from app.schemas.customer import CustomerOut
+from app.services.geo import classify_direction
 
 
 def _point(lat: float, lng: float) -> WKTElement:
@@ -25,6 +27,11 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         requested_pickup_at=payload.requested_pickup_at,
         is_private=payload.is_private,
         price_vnd=price_for(payload.is_private),
+        # Inferred automatically, not customer-supplied — see
+        # app/services/geo.py:classify_direction. This business only
+        # serves the Bắc Giang <-> Hà Nội corridor, so nearest-hub is a
+        # reliable signal without asking the customer to specify it.
+        direction=BookingDirection(classify_direction(payload.pickup_lat, payload.pickup_lng)),
     )
     db.add(booking)
     db.flush()
@@ -49,6 +56,7 @@ def to_booking_out(booking: Booking) -> BookingOut:
         dropoff_lat=dropoff_shape.y,
         dropoff_lng=dropoff_shape.x,
         requested_pickup_at=booking.requested_pickup_at,
+        direction=booking.direction,
         is_private=booking.is_private,
         price_vnd=booking.price_vnd,
         status=booking.status,

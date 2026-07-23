@@ -2,6 +2,11 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { api } from "../lib/api";
 import type { TripOut } from "../types";
 
+const DIRECTION_LABEL: Record<string, string> = {
+  outbound: "→ Hà Nội",
+  return: "→ Bắc Giang",
+};
+
 function fmtVnd(n: number) {
   return n.toLocaleString("vi-VN") + "đ";
 }
@@ -68,7 +73,10 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
                   className="text-sm font-semibold"
                   style={{ fontFamily: "'Space Grotesk', sans-serif" }}
                 >
-                  Xe {idx + 1}
+                  Xe {idx + 1}{" "}
+                  <span style={{ fontWeight: 400, color: "var(--mute)", fontSize: 11 }}>
+                    {DIRECTION_LABEL[trip.bookings[0]?.direction]}
+                  </span>
                 </div>
                 <span
                   className="text-xs"

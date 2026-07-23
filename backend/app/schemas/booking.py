@@ -3,7 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
-from app.models.enums import BookingStatus
+from app.models.enums import BookingDirection, BookingStatus
 from app.schemas.customer import CustomerCreate, CustomerOut
 
 
@@ -20,6 +20,8 @@ class BookingCreate(BaseModel):
 
     requested_pickup_at: datetime
     is_private: bool = False
+    # direction is inferred server-side from pickup location, not
+    # accepted from the client — see app/services/geo.py:classify_direction
 
 
 class BookingOut(BaseModel):
@@ -35,6 +37,7 @@ class BookingOut(BaseModel):
     dropoff_lng: float
 
     requested_pickup_at: datetime
+    direction: BookingDirection
     is_private: bool
     price_vnd: int
     status: BookingStatus

@@ -9,6 +9,11 @@ const STATUS_LABEL: Record<string, string> = {
   cancelled: "Đã hủy",
 };
 
+const DIRECTION_LABEL: Record<string, string> = {
+  outbound: "→ Hà Nội",
+  return: "→ Bắc Giang",
+};
+
 const STATUS_COLOR: Record<string, string> = {
   queued: "var(--mute)",
   matched: "var(--teal)",
@@ -91,6 +96,12 @@ export default function BookingsList({
             </div>
           </div>
           <div className="flex items-center gap-3">
+            <span
+              className="text-xs border rounded px-2 py-0.5"
+              style={{ color: "var(--mute)", borderColor: "var(--line)" }}
+            >
+              {DIRECTION_LABEL[b.direction]}
+            </span>
             {b.is_private && (
               <span
                 className="text-xs border rounded px-2 py-0.5"

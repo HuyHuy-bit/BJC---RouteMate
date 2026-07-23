@@ -1,5 +1,6 @@
 export type UserRole = "admin" | "dispatcher" | "driver";
 export type BookingStatus = "queued" | "matched" | "waiting" | "cancelled";
+export type BookingDirection = "outbound" | "return";
 export type TripStatus =
   | "forming"
   | "confirmed"
@@ -55,6 +56,7 @@ export interface BookingOut {
   dropoff_lat: number;
   dropoff_lng: number;
   requested_pickup_at: string;
+  direction: BookingDirection;
   is_private: boolean;
   price_vnd: number;
   status: BookingStatus;

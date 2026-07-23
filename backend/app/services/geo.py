@@ -21,3 +21,18 @@ class Candidate:
     pickup_lng: float
     dropoff_lat: float
     dropoff_lng: float
+
+
+# The two hub cities this business operates between. Direction is inferred
+# by checking which hub the pickup point is closer to — this business only
+# serves this one corridor, so a simple nearest-hub check is robust
+# without needing the customer/dispatcher to specify direction manually.
+BAC_GIANG_HUB = (21.2731, 106.1946)  # (lat, lng)
+HA_NOI_HUB = (21.0285, 105.8542)
+
+
+def classify_direction(pickup_lat: float, pickup_lng: float) -> str:
+    """Returns 'outbound' if pickup is nearer Bắc Giang, else 'return'."""
+    dist_to_bg = haversine_m(pickup_lat, pickup_lng, *BAC_GIANG_HUB)
+    dist_to_hn = haversine_m(pickup_lat, pickup_lng, *HA_NOI_HUB)
+    return "outbound" if dist_to_bg <= dist_to_hn else "return"
