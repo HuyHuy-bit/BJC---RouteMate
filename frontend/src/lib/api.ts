@@ -7,7 +7,9 @@ import type {
   MatchingRunResult,
   TokenPair,
   TripOut,
+  TripStatus,
   UserOut,
+  UserRole,
 } from "../types";
 
 export const api = {
@@ -17,6 +19,18 @@ export const api = {
         .post<TokenPair>("/auth/login", { phone, password })
         .then((r) => r.data),
     me: () => apiClient.get<UserOut>("/auth/me").then((r) => r.data),
+    register: (payload: {
+      full_name: string;
+      phone: string;
+      password: string;
+      role: UserRole;
+    }) => apiClient.post<UserOut>("/auth/register", payload).then((r) => r.data),
+  },
+  users: {
+    list: (role?: UserRole) =>
+      apiClient
+        .get<UserOut[]>("/users", { params: role ? { role } : undefined })
+        .then((r) => r.data),
   },
   customers: {
     delete: (id: string) => apiClient.delete(`/customers/${id}`),
@@ -41,6 +55,18 @@ export const api = {
         .then((r) => r.data),
     trips: () =>
       apiClient.get<TripOut[]>("/dispatch/trips").then((r) => r.data),
+    myTrips: () =>
+      apiClient.get<TripOut[]>("/dispatch/my-trips").then((r) => r.data),
+    assignDriver: (tripId: string, driverId: string) =>
+      apiClient
+        .patch<TripOut>(`/dispatch/trips/${tripId}/driver`, {
+          driver_id: driverId,
+        })
+        .then((r) => r.data),
+    updateStatus: (tripId: string, status: TripStatus) =>
+      apiClient
+        .patch<TripOut>(`/dispatch/trips/${tripId}/status`, { status })
+        .then((r) => r.data),
   },
   geocode: (address: string) =>
     apiClient

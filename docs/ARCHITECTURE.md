@@ -68,17 +68,38 @@ backend/app/
 - **Trip** — a car assignment: 1–4 bookings, driver/vehicle, computed stop
   order, status (`forming` / `confirmed` / `in_progress` / `completed`)
 
-## 5. Matching algorithm (production version)
+## 5. Matching algorithm (as built)
 
-Same greedy-clustering shape as the prototype, but:
+Greedy clustering over `queued` bookings, grouped by requested pickup date
+first (a booking for tomorrow is never compared against one for today).
+Implementation: `app/services/matching.py` + `app/services/route_solver.py`.
 
-- Runs as a scheduled job (e.g. every 15 min) over `queued` bookings, not a
-  manual button — matches the real "batch until enough riders" business rule
-- Candidate filtering happens in SQL via `ST_DWithin` on both pickup and
-  dropoff, so the database does the heavy lifting instead of JS
-- Route ordering within a confirmed trip upgrades from "sort by x" to a
-  brute-force 4-point route solver (trivial at n≤4) respecting
-  pickup-before-that-rider's-dropoff constraints
+- Runs on a manual trigger (`POST /dispatch/run`) for now — a scheduled
+  job (e.g. every 15 min) is the natural next step once this is running
+  for real, matching the actual "batch until enough riders" business rule
+- Clustering happens in Python over bookings pulled from Postgres, not as
+  a single SQL query — at the volume this business runs (tens of bookings
+  per batch), this is simpler to read and modify than an equivalent
+  recursive SQL query. Worth revisiting with SQL-side `ST_DWithin`
+  pre-filtering only if batch sizes grow into the hundreds.
+- The acceptance criterion for adding a rider to a forming group is
+  **marginal route insertion cost**: the group's actual optimal route
+  (see below) is solved with and without the candidate, and they're only
+  added if the increase stays under the configured max-detour threshold.
+  This is a meaningfully better signal than raw pickup/dropoff proximity
+  — two riders can have close pickups and close dropoffs while still
+  being a bad match if combining them forces the car to backtrack.
+- Route ordering is solved exactly, not approximated: for each finalized
+  group (≤4 riders, ≤8 stops), every valid stop sequence respecting
+  "pickup before that rider's own dropoff" is enumerated via backtracking
+  (at most (2n)!/2^n orderings, ≤2520 at n=4) and the shortest one wins.
+  This is real optimization, not a heuristic — cheap enough to brute-force
+  exactly at this scale.
+- No external API calls in the matching path — everything is haversine
+  geometry on coordinates already in Postgres. Real road distance/drive
+  time (via Goong's Distance Matrix API) would be more accurate but costs
+  API calls and adds latency; noted as a possible future upgrade, not
+  currently worth the cost at this business's scale.
 
 ## 6. Auth & roles
 

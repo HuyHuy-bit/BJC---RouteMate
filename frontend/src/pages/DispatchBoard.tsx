@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import BookingForm from "../components/BookingForm";
@@ -63,13 +64,24 @@ export default function DispatchBoard() {
           </div>
           <div className="text-right text-sm">
             <div style={{ color: "var(--mute)" }}>{user?.full_name}</div>
-            <button
-              onClick={logout}
-              className="text-xs underline"
-              style={{ color: "var(--mute)" }}
-            >
-              Đăng xuất
-            </button>
+            <div className="flex gap-3 justify-end">
+              {user?.role === "admin" && (
+                <Link
+                  to="/admin/users/new"
+                  className="text-xs underline"
+                  style={{ color: "var(--mute)" }}
+                >
+                  + Tài khoản nhân viên
+                </Link>
+              )}
+              <button
+                onClick={logout}
+                className="text-xs underline"
+                style={{ color: "var(--mute)" }}
+              >
+                Đăng xuất
+              </button>
+            </div>
           </div>
         </div>
 
@@ -86,7 +98,7 @@ export default function DispatchBoard() {
               className="text-xs"
               style={{ fontFamily: "'JetBrains Mono', monospace", color: "#D8CFB8" }}
             >
-              BÁN KÍNH GHÉP KHÁCH: {radius}m
+              ĐỘ LỆCH TỐI ĐA CHO PHÉP: {radius}m
             </span>
             <input
               type="range"

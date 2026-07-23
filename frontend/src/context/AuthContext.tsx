@@ -12,7 +12,7 @@ import type { UserOut } from "../types";
 interface AuthContextValue {
   user: UserOut | null;
   loading: boolean;
-  login: (phone: string, password: string) => Promise<void>;
+  login: (phone: string, password: string) => Promise<UserOut>;
   logout: () => void;
 }
 
@@ -39,6 +39,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     tokenStorage.set(tokens);
     const me = await api.auth.me();
     setUser(me);
+    return me;
   };
 
   const logout = () => {

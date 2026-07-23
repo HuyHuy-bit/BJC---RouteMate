@@ -15,8 +15,8 @@ export default function LoginPage() {
     setError(null);
     setSubmitting(true);
     try {
-      await login(phone, password);
-      navigate("/");
+      const me = await login(phone, password);
+      navigate(me.role === "driver" ? "/driver" : "/");
     } catch {
       setError("Sai số điện thoại hoặc mật khẩu");
     } finally {

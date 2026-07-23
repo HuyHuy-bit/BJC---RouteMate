@@ -8,6 +8,7 @@ from app.db.session import get_db
 from app.models.booking import Booking
 from app.models.customer import Customer
 from app.models.enums import UserRole
+from app.models.trip import Trip
 from app.models.user import User
 from app.schemas.customer import CustomerOut
 from app.services.audit import log_pii_access
@@ -73,16 +74,10 @@ def delete_customer(
 ):
     """
     Hard delete: removes the customer AND all of their bookings
-    permanently. This is deliberately destructive rather than a soft
-    delete — it's what satisfies a real customer deletion request under
-    Decree 13/2023/NĐ-CP (see docs/DATA_PROTECTION.md), and it's also just
-    the practical way to clean up a test/mistaken entry.
-
-    If a deleted booking was part of a Trip with other riders, those other
-    riders' bookings are untouched — the Trip row just loses one member.
-    A Trip that ends up with zero bookings is left dangling rather than
-    auto-deleted; harmless, but worth knowing if you're inspecting the
-    trips table directly.
+    permanently. Also cleans up any Trip that ends up with zero bookings
+    as a result — e.g. a 2-rider shared trip where one rider's customer
+    record gets deleted now correctly disappears from the trips list
+    instead of lingering as an empty car.
     """
     customer = db.get(Customer, customer_id)
     if customer is None:
@@ -98,6 +93,18 @@ def delete_customer(
         target_id=customer.id,
     )
 
+    bookings = db.query(Booking).filter(Booking.customer_id == customer.id).all()
+    affected_trip_ids = {b.trip_id for b in bookings if b.trip_id is not None}
+
     db.query(Booking).filter(Booking.customer_id == customer.id).delete()
     db.delete(customer)
+    db.flush()
+
+    for trip_id in affected_trip_ids:
+        remaining = db.query(Booking).filter(Booking.trip_id == trip_id).count()
+        if remaining == 0:
+            trip = db.get(Trip, trip_id)
+            if trip is not None:
+                db.delete(trip)
+
     db.commit()

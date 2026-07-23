@@ -20,3 +20,11 @@ class TripOut(BaseModel):
 class MatchingRunResult(BaseModel):
     trips_created: int
     trips: list[TripOut]
+
+
+class TripAssignDriver(BaseModel):
+    driver_id: uuid.UUID
+
+
+class TripStatusUpdate(BaseModel):
+    status: TripStatus
