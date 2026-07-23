@@ -7,10 +7,13 @@ import BookingForm from "../components/BookingForm";
 import BookingsList from "../components/BookingsList";
 import TripsPanel from "../components/TripsPanel";
 
+// Fixed rather than dispatcher-adjustable — 15km covers this business's
+// service area comfortably without needing a technical knob in the UI.
+const MAX_DETOUR_METERS = 15000;
+
 export default function DispatchBoard() {
   const { user, logout } = useAuth();
   const queryClient = useQueryClient();
-  const [radius, setRadius] = useState(3000);
   const [running, setRunning] = useState(false);
   const [runError, setRunError] = useState<string | null>(null);
 
@@ -32,7 +35,7 @@ export default function DispatchBoard() {
     setRunning(true);
     setRunError(null);
     try {
-      await api.dispatch.run(radius);
+      await api.dispatch.run(MAX_DETOUR_METERS);
       refreshAll();
     } catch (err: any) {
       setRunError(err?.response?.data?.detail ?? "Không thể ghép chuyến");
@@ -97,25 +100,9 @@ export default function DispatchBoard() {
         </div>
 
         <div
-          className="flex items-center justify-between mb-5 px-4 py-3 rounded"
+          className="flex items-center justify-center mb-5 px-4 py-3 rounded"
           style={{ background: "var(--ink)" }}
         >
-          <div className="flex items-center gap-3 text-white">
-            <span
-              className="text-xs"
-              style={{ fontFamily: "'JetBrains Mono', monospace", color: "#D8CFB8" }}
-            >
-              ĐỘ LỆCH TỐI ĐA CHO PHÉP: {radius}m
-            </span>
-            <input
-              type="range"
-              min={500}
-              max={10000}
-              step={500}
-              value={radius}
-              onChange={(e) => setRadius(Number(e.target.value))}
-            />
-          </div>
           <button
             onClick={runMatching}
             disabled={running}
