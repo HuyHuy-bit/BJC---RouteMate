@@ -44,7 +44,7 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
     <div>
       <div
         className="text-sm font-semibold mb-2"
-        style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+        style={{ fontFamily: "'Sora', sans-serif" }}
       >
         Xe được ghép ({trips.length})
       </div>
@@ -71,7 +71,7 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
               <div className="flex justify-between items-center mb-2">
                 <div
                   className="text-sm font-semibold"
-                  style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+                  style={{ fontFamily: "'Sora', sans-serif" }}
                 >
                   Xe {idx + 1}{" "}
                   <span style={{ fontWeight: 400, color: "var(--mute)", fontSize: 11 }}>

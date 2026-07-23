@@ -43,7 +43,7 @@ export default function LoginPage() {
           <div>
             <div
               className="text-sm font-bold leading-tight"
-              style={{ color: "var(--coral)", fontFamily: "'Space Grotesk', sans-serif" }}
+              style={{ color: "var(--coral)", fontFamily: "'Sora', sans-serif" }}
             >
               THÀNH CÔNG LIMOUSINE
             </div>
@@ -58,7 +58,7 @@ export default function LoginPage() {
 
         <h1
           className="text-2xl font-semibold mb-6"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+          style={{ fontFamily: "'Sora', sans-serif" }}
         >
           Đăng nhập
         </h1>

@@ -128,7 +128,7 @@ export default function DriverDashboard() {
               </div>
               <h1
                 className="text-xl font-bold"
-                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+                style={{ fontFamily: "'Sora', sans-serif" }}
               >
                 {user?.full_name}
               </h1>
@@ -136,8 +136,8 @@ export default function DriverDashboard() {
           </div>
           <button
             onClick={logout}
-            className="text-xs underline"
-            style={{ color: "var(--mute)" }}
+            className="text-xs font-medium rounded px-3 py-1.5 border"
+            style={{ color: "var(--coral)", borderColor: "var(--coral)" }}
           >
             Đăng xuất
           </button>

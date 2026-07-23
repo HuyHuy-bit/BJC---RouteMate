@@ -63,28 +63,28 @@ export default function DispatchBoard() {
               </div>
               <h1
                 className="text-2xl font-bold"
-                style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+                style={{ fontFamily: "'Sora', sans-serif" }}
               >
                 Bảng điều phối · Bắc Giang ⇄ Hà Nội
               </h1>
             </div>
           </div>
           <div className="text-right text-sm">
-            <div style={{ color: "var(--mute)" }}>{user?.full_name}</div>
-            <div className="flex gap-3 justify-end">
+            <div className="mb-2" style={{ color: "var(--mute)" }}>{user?.full_name}</div>
+            <div className="flex gap-2 justify-end">
               {user?.role === "admin" && (
                 <Link
                   to="/admin/users/new"
-                  className="text-xs underline"
-                  style={{ color: "var(--mute)" }}
+                  className="text-xs font-medium rounded px-3 py-1.5 border"
+                  style={{ color: "var(--brand-blue)", borderColor: "var(--brand-blue)" }}
                 >
                   + Tài khoản nhân viên
                 </Link>
               )}
               <button
                 onClick={logout}
-                className="text-xs underline"
-                style={{ color: "var(--mute)" }}
+                className="text-xs font-medium rounded px-3 py-1.5 border"
+                style={{ color: "var(--coral)", borderColor: "var(--coral)" }}
               >
                 Đăng xuất
               </button>
@@ -134,7 +134,7 @@ export default function DispatchBoard() {
         <div className="mb-6">
           <div
             className="text-sm font-semibold mb-2"
-            style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+            style={{ fontFamily: "'Sora', sans-serif" }}
           >
             Danh sách khách ({bookingsQuery.data?.length ?? 0})
           </div>

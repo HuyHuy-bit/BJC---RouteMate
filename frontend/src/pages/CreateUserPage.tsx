@@ -62,7 +62,7 @@ export default function CreateUserPage() {
         </div>
         <h1
           className="text-2xl font-bold mb-6"
-          style={{ fontFamily: "'Space Grotesk', sans-serif" }}
+          style={{ fontFamily: "'Sora', sans-serif" }}
         >
           Tạo tài khoản nhân viên
         </h1>
