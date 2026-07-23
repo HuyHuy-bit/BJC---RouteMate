@@ -1,142 +1,170 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { Car, Lock, UserRound, Users } from "lucide-react";
 import { api } from "../lib/api";
-import type { TripOut } from "../types";
+import type { TripOut, TripStatus } from "../types";
+import { DIRECTION, NEXT_TRIP_ACTION, TRIP_STATUS, fmtVnd } from "../lib/format";
+import Badge from "./ui/Badge";
+import Button from "./ui/Button";
+import Card from "./ui/Card";
+import EmptyState from "./ui/EmptyState";
+import Skeleton from "./ui/Skeleton";
+import { useToast } from "./ui/Toast";
 
-const DIRECTION_LABEL: Record<string, string> = {
-  outbound: "→ Hà Nội",
-  return: "→ Bắc Giang",
-};
-
-function fmtVnd(n: number) {
-  return n.toLocaleString("vi-VN") + "đ";
-}
-
-const NEXT_STATUS: Record<string, { label: string; next: string } | undefined> = {
-  confirmed: { label: "Bắt đầu chuyến", next: "in_progress" },
-  in_progress: { label: "Hoàn thành", next: "completed" },
-};
-
-export default function TripsPanel({ trips }: { trips: TripOut[] }) {
+export default function TripsPanel({
+  trips,
+  loading,
+}: {
+  trips: TripOut[];
+  loading?: boolean;
+}) {
+  const toast = useToast();
   const queryClient = useQueryClient();
+
   const driversQuery = useQuery({
     queryKey: ["drivers"],
     queryFn: () => api.users.list("driver"),
   });
 
-  const refresh = () => {
-    queryClient.invalidateQueries({ queryKey: ["trips"] });
-  };
+  const refresh = () => queryClient.invalidateQueries({ queryKey: ["trips"] });
 
-  const handleAssign = async (tripId: string, driverId: string) => {
+  const handleAssign = async (trip: TripOut, driverId: string) => {
     if (!driverId) return;
-    await api.dispatch.assignDriver(tripId, driverId);
-    refresh();
+    try {
+      await api.dispatch.assignDriver(trip.id, driverId);
+      const name = driversQuery.data?.find((d) => d.id === driverId)?.full_name;
+      toast(`Đã giao chuyến cho ${name ?? "tài xế"}.`, "success");
+      refresh();
+    } catch {
+      toast("Không giao được chuyến. Thử lại.", "error");
+    }
   };
 
-  const handleAdvanceStatus = async (tripId: string, nextStatus: string) => {
-    await api.dispatch.updateStatus(tripId, nextStatus as TripOut["status"]);
-    refresh();
+  const handleAdvance = async (trip: TripOut, next: TripStatus, label: string) => {
+    try {
+      await api.dispatch.updateStatus(trip.id, next);
+      toast(`${label} — đã cập nhật.`, "success");
+      refresh();
+    } catch (err: any) {
+      toast(err?.response?.data?.detail ?? "Không cập nhật được chuyến.", "error");
+    }
   };
 
-  if (trips.length === 0) return null;
+  if (loading) {
+    return (
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+        <Skeleton className="h-52 w-full rounded-[var(--radius-lg)]" count={3} />
+      </div>
+    );
+  }
+
+  if (trips.length === 0) {
+    return (
+      <EmptyState
+        icon={<Car size={18} aria-hidden="true" />}
+        title="Chưa có chuyến nào được ghép"
+        description="Nhấn “Ghép chuyến” để hệ thống gom khách cùng tuyến, cùng ngày vào một xe."
+      />
+    );
+  }
 
   return (
-    <div>
-      <div
-        className="text-sm font-semibold mb-2"
-        style={{ fontFamily: "'Sora', sans-serif" }}
-      >
-        Xe được ghép ({trips.length})
-      </div>
-      <div
-        className="grid gap-3"
-        style={{ gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))" }}
-      >
-        {trips.map((trip, idx) => {
-          const revenue = trip.bookings.reduce((sum, b) => sum + b.price_vnd, 0);
-          const action = NEXT_STATUS[trip.status];
-          const assignedDriver = driversQuery.data?.find(
-            (d) => d.id === trip.driver_id
-          );
+    <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+      {trips.map((trip, idx) => {
+        const status = TRIP_STATUS[trip.status];
+        const action = NEXT_TRIP_ACTION[trip.status];
+        const revenue = trip.bookings.reduce((s, b) => s + b.price_vnd, 0);
+        const direction = trip.bookings[0]?.direction;
 
-          return (
-            <div
-              key={trip.id}
-              className="bg-white border rounded p-3"
-              style={{
-                borderColor: "var(--line)",
-                borderLeft: `5px solid ${trip.is_private ? "var(--coral)" : "var(--teal)"}`,
-              }}
-            >
-              <div className="flex justify-between items-center mb-2">
-                <div
-                  className="text-sm font-semibold"
-                  style={{ fontFamily: "'Sora', sans-serif" }}
-                >
-                  Xe {idx + 1}{" "}
-                  <span style={{ fontWeight: 400, color: "var(--mute)", fontSize: 11 }}>
-                    {DIRECTION_LABEL[trip.bookings[0]?.direction]}
+        return (
+          <Card
+            key={trip.id}
+            as="article"
+            interactive
+            accent={trip.is_private ? "var(--brand-red)" : "var(--brand-blue)"}
+            className="p-4 flex flex-col"
+          >
+            <header className="flex items-start justify-between gap-2 mb-3">
+              <div>
+                <h3 className="text-sm font-semibold flex items-center gap-1.5">
+                  <Car size={14} aria-hidden="true" className="text-[var(--text-tertiary)]" />
+                  Xe {idx + 1}
+                </h3>
+                {direction && (
+                  <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                    {DIRECTION[direction].label}
+                  </p>
+                )}
+              </div>
+              <Badge tone={status.tone}>{status.label}</Badge>
+            </header>
+
+            <p className="text-[11px] text-[var(--text-tertiary)] flex items-center gap-1.5 mb-2">
+              {trip.is_private ? (
+                <>
+                  <Lock size={11} aria-hidden="true" /> Bao xe riêng
+                </>
+              ) : (
+                <>
+                  <Users size={11} aria-hidden="true" /> {trip.bookings.length}/4 chỗ
+                </>
+              )}
+            </p>
+
+            <ol className="space-y-1.5 mb-4 flex-1">
+              {trip.bookings.map((b, i) => (
+                <li key={b.id} className="flex items-baseline gap-2 text-[13px]">
+                  <span
+                    className="tnum text-[10px] text-[var(--text-tertiary)] w-3.5 shrink-0"
+                    aria-hidden="true"
+                  >
+                    {i + 1}
                   </span>
-                </div>
-                <span
-                  className="text-xs"
-                  style={{ color: "var(--teal)", fontFamily: "'JetBrains Mono', monospace" }}
-                >
-                  {trip.status.toUpperCase()}
-                </span>
-              </div>
-              <div className="text-xs mb-2" style={{ color: "var(--mute)" }}>
-                {trip.is_private ? "Bao xe riêng" : `${trip.bookings.length}/4 chỗ`}
-              </div>
-              <ol className="text-sm space-y-1 mb-2">
-                {trip.bookings.map((b, i) => (
-                  <li key={b.id}>
-                    {i + 1}. {b.customer.full_name}
-                  </li>
-                ))}
-              </ol>
+                  <span className="truncate">{b.customer.full_name}</span>
+                </li>
+              ))}
+            </ol>
 
-              <div className="text-xs mb-1" style={{ color: "var(--mute)" }}>
-                Tài xế
-              </div>
-              <select
-                className="w-full border rounded px-2 py-1 text-xs mb-2"
-                style={{ borderColor: "var(--line)" }}
-                value={trip.driver_id ?? ""}
-                onChange={(e) => handleAssign(trip.id, e.target.value)}
-              >
-                <option value="">
-                  {assignedDriver ? assignedDriver.full_name : "-- Chưa gán --"}
-                </option>
-                {driversQuery.data
-                  ?.filter((d) => d.id !== trip.driver_id)
-                  .map((d) => (
+            <div className="space-y-2 pt-3 border-t border-[var(--border)]">
+              <label className="block">
+                <span className="sr-only">Tài xế cho xe {idx + 1}</span>
+                <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] mb-1">
+                  <UserRound size={11} aria-hidden="true" /> Tài xế
+                </div>
+                <select
+                  value={trip.driver_id ?? ""}
+                  onChange={(e) => handleAssign(trip, e.target.value)}
+                  className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                >
+                  <option value="">Chưa giao</option>
+                  {driversQuery.data?.map((d) => (
                     <option key={d.id} value={d.id}>
                       {d.full_name}
                     </option>
                   ))}
-              </select>
+                </select>
+              </label>
 
               {action && (
-                <button
-                  onClick={() => handleAdvanceStatus(trip.id, action.next)}
-                  className="w-full text-xs rounded py-1.5 font-semibold text-white mb-2"
-                  style={{ background: "var(--ink)" }}
+                <Button
+                  variant="secondary"
+                  size="sm"
+                  fullWidth
+                  onClick={() => handleAdvance(trip, action.next, action.label)}
                 >
                   {action.label}
-                </button>
+                </Button>
               )}
 
-              <div
-                className="text-sm font-semibold pt-2 border-t"
-                style={{ borderColor: "var(--line)", fontFamily: "'JetBrains Mono', monospace" }}
-              >
-                {fmtVnd(revenue)}
+              <div className="flex items-center justify-between pt-1">
+                <span className="text-[11px] text-[var(--text-tertiary)]">
+                  Doanh thu
+                </span>
+                <span className="text-sm font-semibold tnum">{fmtVnd(revenue)}</span>
               </div>
             </div>
-          );
-        })}
-      </div>
+          </Card>
+        );
+      })}
     </div>
   );
 }

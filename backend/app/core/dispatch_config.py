@@ -1,0 +1,68 @@
+"""
+Every tunable dispatch parameter in one place, so operations can be
+adjusted without hunting through algorithm code — and so a peak/holiday
+profile can override them wholesale later.
+"""
+
+# --- Capacity ---
+# Passenger seats, excluding the driver. If Thành Công's "xe 4 chỗ" means
+# 4 seats TOTAL (driver + 3 passengers), change this to 3 — it is the
+# single source of truth for capacity across matching and dispatch.
+MAX_PASSENGERS = 4
+
+# --- Time windows ---
+# Two bookings can only share a car if their requested pickup times fall
+# within this window of each other. Replaces the old "same calendar date"
+# bucketing, which wrongly matched 06:00 with 22:00 and wrongly refused
+# to match 23:50 with 00:10.
+PICKUP_WINDOW_MINUTES = 45
+
+# How long a forming pool waits for more passengers before it must decide
+# to depart or escalate.
+MAX_POOL_WAIT_MINUTES = 45
+PEAK_POOL_WAIT_MINUTES = 20
+
+# --- Per-passenger service guarantee ---
+# No passenger may spend more than this many minutes longer in the car
+# than they would have on a direct solo trip. This is a PASSENGER
+# experience constraint, unlike the old fleet-cost "max added km" check.
+MAX_PASSENGER_DETOUR_MINUTES = 15
+
+# --- Fleet-level cost guard (secondary to the per-passenger rule) ---
+MAX_POOL_DETOUR_MINUTES = 35
+
+# --- Scoring weights (must sum to 1.0) ---
+# Occupancy is weighted highest on purpose: filling one car before
+# opening a second is the primary business objective.
+WEIGHT_OCCUPANCY = 0.30
+WEIGHT_ADDED_DISTANCE = 0.25
+WEIGHT_WORST_DETOUR = 0.20
+WEIGHT_PICKUP_WAIT = 0.15
+WEIGHT_DEADLINE_PRESSURE = 0.10
+
+# An insertion scoring worse than this is rejected even if feasible —
+# prevents technically-legal but terrible matches.
+MAX_ACCEPTABLE_SCORE = 0.75
+
+# --- Minimum viable pool size, by direction ---
+# Outbound must fill seats to be worth running. Return dispatches solo
+# because the vehicle drives back to base regardless.
+MIN_POOL_SIZE_OUTBOUND = 2
+MIN_POOL_SIZE_RETURN = 1
+
+# --- Routing service ---
+ROUTE_CACHE_TTL_SECONDS = 3600
+ROUTING_TIMEOUT_SECONDS = 8.0
+ROUTING_MAX_RETRIES = 2
+# If Goong fails this many times consecutively, stop calling it for
+# CIRCUIT_RESET_SECONDS and fall back to haversine estimates rather than
+# taking dispatch offline entirely.
+CIRCUIT_FAILURE_THRESHOLD = 5
+CIRCUIT_RESET_SECONDS = 60
+
+# Rough average corridor speed, used ONLY by the degraded fallback path
+# when Goong is unreachable. Deliberately conservative.
+FALLBACK_SPEED_KMH = 38.0
+
+# --- Dispatch engine ---
+DISPATCH_TICK_SECONDS = 60

@@ -12,6 +12,7 @@ from app.schemas.booking import BookingCreate, BookingOut
 from app.services.audit import log_pii_access
 from app.services.booking_service import create_booking, to_booking_out
 from app.services.customer_service import get_or_create_customer
+from app.services.dispatch_service import assign_booking
 
 router = APIRouter(tags=["bookings"])
 
@@ -24,6 +25,12 @@ def create_booking_route(
 ):
     customer = get_or_create_customer(db, payload.customer)
     booking = create_booking(db, customer, payload)
+
+    # Match immediately rather than waiting for a human to trigger a
+    # batch run. This is what makes pooling continuous: the booking is
+    # offered to every compatible forming pool right now, and only opens
+    # a new car if none of them fit.
+    assign_booking(db, booking)
 
     log_pii_access(
         db,

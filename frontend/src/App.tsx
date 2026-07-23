@@ -1,14 +1,23 @@
+import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
 import LoginPage from "./pages/LoginPage";
-import DispatchBoard from "./pages/DispatchBoard";
-import DriverDashboard from "./pages/DriverDashboard";
-import CreateUserPage from "./pages/CreateUserPage";
+import type { UserRole } from "./types";
 
-function Loading() {
+// Route-level code splitting — the driver bundle shouldn't ship the
+// dispatch board (and its map library) to a phone that will never open it.
+const DispatchBoard = lazy(() => import("./pages/DispatchBoard"));
+const DriverDashboard = lazy(() => import("./pages/DriverDashboard"));
+const CreateUserPage = lazy(() => import("./pages/CreateUserPage"));
+
+function FullPageLoader() {
   return (
-    <div className="min-h-screen flex items-center justify-center text-sm">
-      Đang tải...
+    <div
+      className="min-h-screen flex items-center justify-center"
+      role="status"
+      aria-label="Đang tải"
+    >
+      <div className="w-6 h-6 rounded-full border-2 border-[var(--border-strong)] border-t-[var(--brand-red)] animate-spin" />
     </div>
   );
 }
@@ -17,11 +26,11 @@ function ProtectedRoute({
   children,
   allow,
 }: {
-  children: React.ReactNode;
-  allow?: Array<"admin" | "dispatcher" | "driver">;
+  children: ReactNode;
+  allow?: UserRole[];
 }) {
   const { user, loading } = useAuth();
-  if (loading) return <Loading />;
+  if (loading) return <FullPageLoader />;
   if (!user) return <Navigate to="/login" replace />;
   if (allow && !allow.includes(user.role)) {
     return <Navigate to={user.role === "driver" ? "/driver" : "/"} replace />;
@@ -31,32 +40,35 @@ function ProtectedRoute({
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<LoginPage />} />
-      <Route
-        path="/"
-        element={
-          <ProtectedRoute allow={["admin", "dispatcher"]}>
-            <DispatchBoard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/driver"
-        element={
-          <ProtectedRoute allow={["driver"]}>
-            <DriverDashboard />
-          </ProtectedRoute>
-        }
-      />
-      <Route
-        path="/admin/users/new"
-        element={
-          <ProtectedRoute allow={["admin"]}>
-            <CreateUserPage />
-          </ProtectedRoute>
-        }
-      />
-    </Routes>
+    <Suspense fallback={<FullPageLoader />}>
+      <Routes>
+        <Route path="/login" element={<LoginPage />} />
+        <Route
+          path="/"
+          element={
+            <ProtectedRoute allow={["admin", "dispatcher"]}>
+              <DispatchBoard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/driver"
+          element={
+            <ProtectedRoute allow={["driver"]}>
+              <DriverDashboard />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/admin/users/new"
+          element={
+            <ProtectedRoute allow={["admin"]}>
+              <CreateUserPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </Suspense>
   );
 }

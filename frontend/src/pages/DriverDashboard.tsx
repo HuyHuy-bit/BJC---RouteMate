@@ -1,102 +1,24 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
+import { ArrowDownToLine, ArrowUpFromLine, Car, Phone } from "lucide-react";
 import { api } from "../lib/api";
-import { useAuth } from "../context/AuthContext";
-import type { TripOut } from "../types";
-
-const NEXT_STATUS: Record<string, { label: string; next: string } | undefined> = {
-  confirmed: { label: "Bắt đầu chuyến", next: "in_progress" },
-  in_progress: { label: "Hoàn thành chuyến", next: "completed" },
-};
-
-function fmtVnd(n: number) {
-  return n.toLocaleString("vi-VN") + "đ";
-}
-
-function fmtDateTime(iso: string) {
-  return new Date(iso).toLocaleString("vi-VN", {
-    day: "2-digit",
-    month: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
-
-function TripCard({ trip, onAdvance }: { trip: TripOut; onAdvance: () => void }) {
-  const action = NEXT_STATUS[trip.status];
-  const sorted = [...trip.bookings].sort(
-    (a, b) => (a.pickup_lng ?? 0) - (b.pickup_lng ?? 0)
-  );
-
-  const handleAdvance = async () => {
-    if (!action) return;
-    await api.dispatch.updateStatus(trip.id, action.next as TripOut["status"]);
-    onAdvance();
-  };
-
-  return (
-    <div
-      className="bg-white border rounded p-4 mb-4"
-      style={{
-        borderColor: "var(--line)",
-        borderLeft: `5px solid ${trip.is_private ? "var(--coral)" : "var(--teal)"}`,
-      }}
-    >
-      <div className="flex justify-between items-center mb-3">
-        <span
-          className="text-xs"
-          style={{ color: "var(--teal)", fontFamily: "'JetBrains Mono', monospace" }}
-        >
-          {trip.status === "confirmed" ? "SẴN SÀNG CHẠY" : "ĐANG CHẠY"}
-        </span>
-        <span className="text-xs" style={{ color: "var(--mute)" }}>
-          {trip.is_private ? "Bao xe riêng" : `${trip.bookings.length}/4 khách`}
-        </span>
-      </div>
-
-      <ol className="space-y-3 mb-4">
-        {sorted.map((b, i) => (
-          <li
-            key={b.id}
-            className="text-sm border-b pb-2 last:border-b-0"
-            style={{ borderColor: "var(--line)" }}
-          >
-            <div className="font-semibold">
-              {i + 1}. {b.customer.full_name}{" "}
-              <span style={{ color: "var(--mute)", fontWeight: 400 }}>
-                — {b.customer.phone}
-              </span>
-            </div>
-            <div className="text-xs mt-1" style={{ color: "var(--mute)" }}>
-              Đón: {b.pickup_address}
-            </div>
-            <div className="text-xs" style={{ color: "var(--mute)" }}>
-              Trả: {b.dropoff_address}
-            </div>
-            <div
-              className="text-xs mt-1"
-              style={{ fontFamily: "'JetBrains Mono', monospace" }}
-            >
-              {fmtDateTime(b.requested_pickup_at)} · {fmtVnd(b.price_vnd)}
-            </div>
-          </li>
-        ))}
-      </ol>
-
-      {action && (
-        <button
-          onClick={handleAdvance}
-          className="w-full rounded py-2 text-sm font-semibold text-white"
-          style={{ background: "var(--ink)" }}
-        >
-          {action.label}
-        </button>
-      )}
-    </div>
-  );
-}
+import type { TripOut, TripStatus } from "../types";
+import AppShell from "../components/layout/AppShell";
+import Badge from "../components/ui/Badge";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import EmptyState from "../components/ui/EmptyState";
+import Skeleton from "../components/ui/Skeleton";
+import { useToast } from "../components/ui/Toast";
+import {
+  DIRECTION,
+  NEXT_TRIP_ACTION,
+  TRIP_STATUS,
+  fmtDayLabel,
+  fmtTime,
+} from "../lib/format";
 
 export default function DriverDashboard() {
-  const { user, logout } = useAuth();
+  const toast = useToast();
   const queryClient = useQueryClient();
 
   const tripsQuery = useQuery({
@@ -106,62 +28,140 @@ export default function DriverDashboard() {
 
   const refresh = () => queryClient.invalidateQueries({ queryKey: ["my-trips"] });
 
+  const advance = async (trip: TripOut, next: TripStatus, label: string) => {
+    try {
+      await api.dispatch.updateStatus(trip.id, next);
+      toast(`${label} — đã cập nhật.`, "success");
+      refresh();
+    } catch (err: any) {
+      toast(err?.response?.data?.detail ?? "Không cập nhật được chuyến.", "error");
+    }
+  };
+
+  const trips = tripsQuery.data ?? [];
+
   return (
-    <div className="min-h-screen" style={{ background: "var(--paper)" }}>
-      <div className="max-w-md mx-auto px-4 py-6">
-        <div
-          className="flex justify-between items-end mb-5 pb-3 border-b-2"
-          style={{ borderColor: "var(--ink)" }}
-        >
-          <div className="flex items-center gap-2">
-            <img
-              src="/bjc-logo.jpg"
-              alt="BJC Group"
-              className="w-9 h-9 rounded-full object-cover"
-            />
-            <div>
-              <div
-                className="text-xs tracking-widest mb-1"
-                style={{ color: "var(--coral)", fontFamily: "'JetBrains Mono', monospace" }}
-              >
-                THÀNH CÔNG · TÀI XẾ
-              </div>
-              <h1
-                className="text-xl font-bold"
-                style={{ fontFamily: "'Sora', sans-serif" }}
-              >
-                {user?.full_name}
-              </h1>
-            </div>
-          </div>
-          <button
-            onClick={logout}
-            className="text-xs font-medium rounded px-3 py-1.5 border"
-            style={{ color: "var(--coral)", borderColor: "var(--coral)" }}
-          >
-            Đăng xuất
-          </button>
-        </div>
+    <AppShell
+      title="Chuyến của tôi"
+      subtitle={
+        trips.length > 0 ? `${trips.length} chuyến đang chờ bạn` : undefined
+      }
+      width="narrow"
+    >
+      {tripsQuery.isLoading && (
+        <Skeleton className="h-64 w-full rounded-[var(--radius-lg)] mb-4" count={2} />
+      )}
 
-        {tripsQuery.isLoading && (
-          <div className="text-sm" style={{ color: "var(--mute)" }}>
-            Đang tải...
-          </div>
-        )}
+      {!tripsQuery.isLoading && trips.length === 0 && (
+        <Card>
+          <EmptyState
+            icon={<Car size={18} aria-hidden="true" />}
+            title="Chưa có chuyến nào được giao"
+            description="Khi điều phối viên giao chuyến cho bạn, chuyến sẽ hiện ở đây kèm danh sách khách và thứ tự đón."
+          />
+        </Card>
+      )}
 
-        {tripsQuery.data && tripsQuery.data.length === 0 && (
-          <div
-            className="text-sm text-center py-8 border rounded border-dashed"
-            style={{ color: "var(--mute)", borderColor: "var(--line)" }}
-          >
-            Chưa có chuyến nào được giao cho bạn.
-          </div>
-        )}
+      <div className="space-y-4">
+        {trips.map((trip) => {
+          const status = TRIP_STATUS[trip.status];
+          const action = NEXT_TRIP_ACTION[trip.status];
+          const direction = trip.bookings[0]?.direction;
+          const stops = [...trip.bookings].sort(
+            (a, b) => (a.pickup_lng ?? 0) - (b.pickup_lng ?? 0)
+          );
 
-        {tripsQuery.data?.map((trip) => (
-          <TripCard key={trip.id} trip={trip} onAdvance={refresh} />
-        ))}
+          return (
+            <Card
+              key={trip.id}
+              as="article"
+              accent={trip.is_private ? "var(--brand-red)" : "var(--brand-blue)"}
+              className="overflow-hidden"
+            >
+              <header className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between gap-2">
+                <div>
+                  <h2 className="text-sm font-semibold">
+                    {direction ? DIRECTION[direction].label : "Chuyến xe"}
+                  </h2>
+                  <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                    {trip.is_private
+                      ? "Bao xe riêng"
+                      : `${trip.bookings.length} khách`}
+                    {trip.bookings[0] &&
+                      ` · ${fmtDayLabel(trip.bookings[0].requested_pickup_at)}`}
+                  </p>
+                </div>
+                <Badge tone={status.tone}>{status.label}</Badge>
+              </header>
+
+              <ol className="divide-y divide-[var(--border)]">
+                {stops.map((b, i) => (
+                  <li key={b.id} className="px-4 py-3">
+                    <div className="flex items-start gap-3">
+                      <span
+                        className="w-5 h-5 rounded-full bg-[var(--surface-sunken)] text-[10px] font-semibold flex items-center justify-center shrink-0 mt-0.5 tnum"
+                        aria-hidden="true"
+                      >
+                        {i + 1}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-center justify-between gap-2">
+                          <span className="text-sm font-medium truncate">
+                            {b.customer.full_name}
+                          </span>
+                          {/* Tap-to-call — a driver holding a phone
+                              shouldn't have to copy a number by hand */}
+                          <a
+                            href={`tel:${b.customer.phone}`}
+                            className="shrink-0 inline-flex items-center gap-1 text-xs text-[var(--brand-blue)] font-medium hover:underline"
+                            aria-label={`Gọi ${b.customer.full_name}`}
+                          >
+                            <Phone size={12} aria-hidden="true" />
+                            <span className="tnum">{b.customer.phone}</span>
+                          </a>
+                        </div>
+
+                        <p className="text-xs text-[var(--text-secondary)] mt-1.5 flex items-start gap-1.5">
+                          <ArrowUpFromLine
+                            size={12}
+                            className="mt-0.5 shrink-0 text-[var(--brand-blue)]"
+                            aria-hidden="true"
+                          />
+                          <span className="leading-snug">{b.pickup_address}</span>
+                        </p>
+                        <p className="text-xs text-[var(--text-secondary)] mt-1 flex items-start gap-1.5">
+                          <ArrowDownToLine
+                            size={12}
+                            className="mt-0.5 shrink-0 text-[var(--brand-red)]"
+                            aria-hidden="true"
+                          />
+                          <span className="leading-snug">{b.dropoff_address}</span>
+                        </p>
+                        <p className="text-[11px] text-[var(--text-tertiary)] mt-1.5 tnum">
+                          Đón lúc {fmtTime(b.requested_pickup_at)}
+                        </p>
+                      </div>
+                    </div>
+                  </li>
+                ))}
+              </ol>
+
+              {action && (
+                <div className="p-4 border-t border-[var(--border)] bg-[var(--surface-sunken)]">
+                  <Button
+                    variant="primary"
+                    size="lg"
+                    fullWidth
+                    onClick={() => advance(trip, action.next, action.label)}
+                  >
+                    {action.label}
+                  </Button>
+                </div>
+              )}
+            </Card>
+          );
+        })}
       </div>
-    </div>
+    </AppShell>
   );
 }

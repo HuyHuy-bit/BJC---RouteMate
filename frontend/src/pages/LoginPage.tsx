@@ -1,6 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { useNavigate } from "react-router-dom";
+import { Phone } from "lucide-react";
 import { useAuth } from "../context/AuthContext";
+import Button from "../components/ui/Button";
+import Field from "../components/ui/Field";
 
 export default function LoginPage() {
   const { login } = useAuth();
@@ -16,98 +19,121 @@ export default function LoginPage() {
     setSubmitting(true);
     try {
       const me = await login(phone, password);
-      navigate(me.role === "driver" ? "/driver" : "/");
+      navigate(me.role === "driver" ? "/driver" : "/", { replace: true });
     } catch {
-      setError("Sai số điện thoại hoặc mật khẩu");
+      setError("Số điện thoại hoặc mật khẩu không đúng.");
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div
-      className="min-h-screen flex items-center justify-center"
-      style={{ background: "var(--brand-blue)" }}
-    >
-      <form
-        onSubmit={handleSubmit}
-        className="bg-white border rounded p-8 w-full max-w-sm"
-        style={{ borderColor: "var(--line)" }}
-      >
-        <div className="flex items-center gap-3 mb-5">
+    <div className="min-h-screen grid lg:grid-cols-[1.1fr_1fr]">
+      {/* Brand panel — the fleet photo is the most characteristic thing
+          this company owns, so it leads. Hidden on mobile where vertical
+          space is scarce and the form is the only job. */}
+      <aside className="relative hidden lg:block overflow-hidden bg-[var(--surface-inverse)]">
+        <img
+          src="/thanh-cong-fleet.jpg"
+          alt=""
+          className="absolute inset-0 w-full h-full object-cover opacity-45"
+        />
+        <div
+          className="absolute inset-0"
+          style={{
+            background:
+              "linear-gradient(135deg, rgba(16,23,40,0.92) 0%, rgba(27,95,168,0.72) 55%, rgba(214,51,31,0.55) 100%)",
+          }}
+        />
+        <div className="relative h-full flex flex-col justify-between p-10 xl:p-14 text-white">
           <img
             src="/bjc-logo.jpg"
             alt="BJC Group"
-            className="w-12 h-12 rounded-full object-cover"
+            className="w-12 h-12 rounded-[var(--radius-md)] object-cover"
           />
           <div>
-            <div
-              className="text-sm font-bold leading-tight"
-              style={{ color: "var(--coral)", fontFamily: "'Sora', sans-serif" }}
-            >
-              THÀNH CÔNG LIMOUSINE
-            </div>
-            <div
-              className="text-xs"
-              style={{ color: "var(--mute)", fontFamily: "'JetBrains Mono', monospace" }}
-            >
-              BJC GROUP · BẮC GIANG
-            </div>
+            <p className="text-[11px] tracking-[0.18em] text-white/70 mb-3 font-[family-name:var(--font-mono)]">
+              HỆ THỐNG ĐIỀU PHỐI NỘI BỘ
+            </p>
+            <h1 className="text-[40px] xl:text-[46px] font-semibold leading-[1.08] max-w-[14ch]">
+              Bắc Giang
+              <br />
+              <span className="text-white/55">⇄</span> Hà Nội
+            </h1>
+            <p className="text-sm text-white/75 mt-5 max-w-[42ch] leading-relaxed">
+              Ghép khách theo quãng đường thực tế, đón và trả tận nơi.
+            </p>
+          </div>
+          <div className="flex items-center gap-2 text-sm text-white/80">
+            <Phone size={14} aria-hidden="true" />
+            <span>Hotline 1900 8293</span>
           </div>
         </div>
+      </aside>
 
-        <h1
-          className="text-2xl font-semibold mb-6"
-          style={{ fontFamily: "'Sora', sans-serif" }}
-        >
-          Đăng nhập
-        </h1>
-
-        <label className="block text-sm mb-1" style={{ color: "var(--mute)" }}>
-          Số điện thoại
-        </label>
-        <input
-          value={phone}
-          onChange={(e) => setPhone(e.target.value)}
-          className="w-full border rounded px-3 py-2 mb-4 text-sm"
-          style={{ borderColor: "var(--line)" }}
-          autoComplete="username"
-        />
-
-        <label className="block text-sm mb-1" style={{ color: "var(--mute)" }}>
-          Mật khẩu
-        </label>
-        <input
-          type="password"
-          value={password}
-          onChange={(e) => setPassword(e.target.value)}
-          className="w-full border rounded px-3 py-2 mb-4 text-sm"
-          style={{ borderColor: "var(--line)" }}
-          autoComplete="current-password"
-        />
-
-        {error && (
-          <div className="text-sm mb-4" style={{ color: "var(--coral)" }}>
-            {error}
+      {/* Form panel */}
+      <div className="flex items-center justify-center p-6 sm:p-10 bg-[var(--bg)]">
+        <div className="w-full max-w-[380px] animate-slide-up">
+          <div className="lg:hidden flex items-center gap-2.5 mb-8">
+            <img
+              src="/bjc-logo.jpg"
+              alt=""
+              className="w-9 h-9 rounded-[var(--radius)] object-cover"
+            />
+            <div>
+              <div className="text-sm font-semibold font-[family-name:var(--font-display)]">
+                Thành Công Limousine
+              </div>
+              <div className="text-[10px] text-[var(--text-tertiary)] tracking-wide">
+                BJC GROUP
+              </div>
+            </div>
           </div>
-        )}
 
-        <button
-          type="submit"
-          disabled={submitting}
-          className="w-full rounded py-2 text-sm font-semibold text-white"
-          style={{ background: "var(--amber)", opacity: submitting ? 0.6 : 1 }}
-        >
-          {submitting ? "Đang đăng nhập..." : "Đăng nhập"}
-        </button>
+          <h2 className="text-2xl font-semibold text-[var(--text)]">Đăng nhập</h2>
+          <p className="text-sm text-[var(--text-tertiary)] mt-1.5 mb-7">
+            Dành cho nhân viên điều phối và tài xế.
+          </p>
 
-        <div
-          className="text-center text-xs mt-5 pt-4 border-t"
-          style={{ color: "var(--mute)", borderColor: "var(--line)" }}
-        >
-          Hotline: <span style={{ color: "var(--coral)", fontWeight: 600 }}>1900 8293</span>
+          <form onSubmit={handleSubmit} noValidate>
+            <div className="space-y-4">
+              <Field
+                label="Số điện thoại"
+                type="tel"
+                inputMode="tel"
+                autoComplete="username"
+                value={phone}
+                onChange={(e) => setPhone(e.target.value)}
+                required
+              />
+              <Field
+                label="Mật khẩu"
+                type="password"
+                autoComplete="current-password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                error={error ?? undefined}
+                required
+              />
+            </div>
+
+            <Button
+              type="submit"
+              variant="primary"
+              size="lg"
+              fullWidth
+              loading={submitting}
+              className="mt-6"
+            >
+              {submitting ? "Đang đăng nhập" : "Đăng nhập"}
+            </Button>
+          </form>
+
+          <p className="text-xs text-[var(--text-tertiary)] mt-8 text-center lg:hidden">
+            Hotline 1900 8293
+          </p>
         </div>
-      </form>
+      </div>
     </div>
   );
 }

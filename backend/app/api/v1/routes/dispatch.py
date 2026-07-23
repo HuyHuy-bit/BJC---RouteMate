@@ -17,14 +17,22 @@ from app.schemas.trip import (
 )
 from app.services.audit import log_pii_access
 from app.services.booking_service import to_booking_out
-from app.services.matching import run_matching
+from app.services.dispatch_service import run_dispatch_cycle
 
 router = APIRouter(tags=["dispatch"])
 
+# Only these forward transitions are allowed — no skipping steps, no going
+# backwards. Any role-appropriate caller can cancel from most states.
 ALLOWED_TRANSITIONS: dict[TripStatus, set[TripStatus]] = {
-    TripStatus.forming: {TripStatus.confirmed, TripStatus.cancelled},
-    TripStatus.confirmed: {TripStatus.in_progress, TripStatus.cancelled},
+    TripStatus.forming: {TripStatus.sealed, TripStatus.cancelled},
+    TripStatus.sealed: {TripStatus.assigned, TripStatus.cancelled},
+    TripStatus.assigned: {
+        TripStatus.in_progress,
+        TripStatus.reassigning,
+        TripStatus.cancelled,
+    },
     TripStatus.in_progress: {TripStatus.completed, TripStatus.cancelled},
+    TripStatus.reassigning: {TripStatus.assigned, TripStatus.cancelled},
     TripStatus.completed: set(),
     TripStatus.cancelled: set(),
 }
@@ -57,20 +65,26 @@ def _load_trip(db: Session, trip_id: uuid.UUID) -> Trip:
 
 @router.post("/run", response_model=MatchingRunResult)
 def run_dispatch(
-    radius_meters: float = 3000,
+    radius_meters: float = 3000,  # retained for API compatibility; unused
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
 ):
-    trips = run_matching(db, radius_meters=radius_meters)
+    """
+    Manual trigger for the dispatch cycle.
 
-    trip_ids = [t.id for t in trips]
+    The cycle now also runs automatically on a timer, so this is an
+    override rather than the only way trips ever leave — a dispatcher
+    who wants to push things along immediately, not a required step.
+    """
+    summary = run_dispatch_cycle(db)
+
     full_trips = (
         db.query(Trip)
         .options(joinedload(Trip.bookings).joinedload(Booking.customer))
-        .filter(Trip.id.in_(trip_ids))
+        .filter(Trip.status.in_([TripStatus.assigned, TripStatus.sealed]))
+        .order_by(Trip.created_at.desc())
         .all()
     )
-
     for trip in full_trips:
         for booking in trip.bookings:
             log_pii_access(
@@ -80,13 +94,10 @@ def run_dispatch(
                 target_type="customer",
                 target_id=booking.customer_id,
             )
-
     db.commit()
-    for trip in full_trips:
-        db.refresh(trip)
 
     trips_out = [_to_trip_out(t) for t in full_trips]
-    return MatchingRunResult(trips_created=len(trips_out), trips=trips_out)
+    return MatchingRunResult(trips_created=summary["sealed"], trips=trips_out)
 
 
 @router.get("/trips", response_model=list[TripOut])
@@ -115,7 +126,7 @@ def my_trips(
         db.query(Trip)
         .options(joinedload(Trip.bookings).joinedload(Booking.customer))
         .filter(Trip.driver_id == current_user.id)
-        .filter(Trip.status.in_([TripStatus.confirmed, TripStatus.in_progress]))
+        .filter(Trip.status.in_([TripStatus.assigned, TripStatus.in_progress]))
         .filter(Trip.bookings.any())
         .order_by(Trip.created_at.asc())
         .all()

@@ -1,16 +1,31 @@
-import { useState } from "react";
+import { useId, useState } from "react";
+import { Check, Loader2, MapPin, Search } from "lucide-react";
 import { api } from "../lib/api";
 import type { GeocodeResult } from "../types";
-import MapView from "./MapView";
+import Button from "./ui/Button";
 
 interface Props {
   label: string;
-  onSelect: (result: GeocodeResult) => void;
+  placeholder?: string;
   selected: GeocodeResult | null;
+  onSelect: (r: GeocodeResult) => void;
+  accentColor: string;
 }
 
-export default function AddressField({ label, onSelect, selected }: Props) {
-  const [query, setQuery] = useState("");
+/**
+ * Search-then-confirm, with results as a real listbox. The map preview
+ * moved out to a single shared trip map (see BookingForm) so pickup and
+ * dropoff can be judged together rather than in isolation.
+ */
+export default function AddressField({
+  label,
+  placeholder = "Ví dụ: 12 Việt Yên, Bắc Giang",
+  selected,
+  onSelect,
+  accentColor,
+}: Props) {
+  const id = useId();
+  const [query, setQuery] = useState(selected?.formatted_address ?? "");
   const [results, setResults] = useState<GeocodeResult[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -23,13 +38,12 @@ export default function AddressField({ label, onSelect, selected }: Props) {
     try {
       const res = await api.geocode(query);
       if (res.results.length === 0) {
-        setError("Không tìm thấy địa chỉ này");
+        setError("Không tìm thấy địa chỉ này. Thử nhập tên xã hoặc phường.");
       }
       setResults(res.results);
     } catch (err: any) {
       setError(
-        err?.response?.data?.detail ??
-          "Không thể tìm địa chỉ — kiểm tra kết nối Goong Maps"
+        err?.response?.data?.detail ?? "Không tìm được địa chỉ. Kiểm tra kết nối."
       );
     } finally {
       setLoading(false);
@@ -38,72 +52,88 @@ export default function AddressField({ label, onSelect, selected }: Props) {
 
   return (
     <div>
-      <div
-        className="text-xs mb-1"
-        style={{ color: "var(--mute)", fontFamily: "'JetBrains Mono', monospace" }}
+      <label
+        htmlFor={id}
+        className="flex items-center gap-1.5 text-[12px] font-medium mb-1.5 text-[var(--text-secondary)]"
       >
+        <span
+          className="w-2 h-2 rounded-full shrink-0"
+          style={{ background: accentColor }}
+          aria-hidden="true"
+        />
         {label}
-      </div>
+      </label>
+
       <div className="flex gap-2">
         <input
+          id={id}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && search()}
-          placeholder="Nhập địa chỉ..."
-          className="flex-1 border rounded px-3 py-2 text-sm"
-          style={{ borderColor: "var(--line)" }}
+          onKeyDown={(e) => {
+            if (e.key === "Enter") {
+              e.preventDefault();
+              search();
+            }
+          }}
+          placeholder={placeholder}
+          aria-describedby={error ? `${id}-error` : undefined}
+          className="flex-1 h-9 px-3 text-sm rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors placeholder:text-[var(--text-tertiary)]"
         />
-        <button
+        <Button
           type="button"
           onClick={search}
-          disabled={loading || !query.trim()}
-          className="px-3 border rounded text-sm"
-          style={{ borderColor: "var(--line)" }}
+          disabled={!query.trim() || loading}
+          aria-label={`Tìm ${label.toLowerCase()}`}
+          className="!px-2.5 shrink-0"
         >
-          {loading ? "..." : "Tìm"}
-        </button>
+          {loading ? (
+            <Loader2 size={15} className="animate-spin" aria-hidden="true" />
+          ) : (
+            <Search size={15} aria-hidden="true" />
+          )}
+        </Button>
       </div>
 
       {error && (
-        <div className="text-xs mt-1" style={{ color: "var(--amber)" }}>
+        <p id={`${id}-error`} role="alert" className="mt-1.5 text-xs text-[var(--warning)]">
           {error}
-        </div>
+        </p>
       )}
 
       {results.length > 0 && (
-        <div
-          className="mt-2 border rounded overflow-hidden"
-          style={{ borderColor: "var(--line)" }}
+        <ul
+          role="listbox"
+          aria-label="Kết quả tìm kiếm"
+          className="mt-2 border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden bg-[var(--surface)] shadow-[var(--shadow-sm)] animate-slide-up max-h-52 overflow-y-auto"
         >
           {results.map((r) => (
-            <button
-              type="button"
-              key={r.place_id}
-              onClick={() => {
-                onSelect(r);
-                setResults([]);
-                setQuery(r.formatted_address);
-              }}
-              className="block w-full text-left px-3 py-2 text-sm hover:bg-gray-50 border-b last:border-b-0"
-              style={{ borderColor: "var(--line)" }}
-            >
-              {r.formatted_address}
-            </button>
+            <li key={r.place_id} role="option" aria-selected={false}>
+              <button
+                type="button"
+                onClick={() => {
+                  onSelect(r);
+                  setResults([]);
+                  setQuery(r.formatted_address);
+                }}
+                className="w-full text-left px-3 py-2.5 text-[13px] flex items-start gap-2 hover:bg-[var(--surface-sunken)] transition-colors border-b border-[var(--border)] last:border-b-0"
+              >
+                <MapPin
+                  size={14}
+                  className="mt-0.5 shrink-0 text-[var(--text-tertiary)]"
+                  aria-hidden="true"
+                />
+                <span className="leading-snug">{r.formatted_address}</span>
+              </button>
+            </li>
           ))}
-        </div>
+        </ul>
       )}
 
-      {selected && (
-        <div className="mt-2 space-y-1">
-          <div className="text-xs" style={{ color: "var(--teal)" }}>
-            ✓ Đã chọn: {selected.formatted_address} ({selected.lat.toFixed(5)},{" "}
-            {selected.lng.toFixed(5)})
-          </div>
-          <MapView
-            center={{ lat: selected.lat, lng: selected.lng }}
-            pins={[{ lat: selected.lat, lng: selected.lng }]}
-          />
-        </div>
+      {selected && results.length === 0 && (
+        <p className="mt-1.5 text-xs text-[var(--success)] flex items-start gap-1.5">
+          <Check size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
+          <span className="leading-snug">{selected.formatted_address}</span>
+        </p>
       )}
     </div>
   );

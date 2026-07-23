@@ -1,28 +1,52 @@
 import { useState, type FormEvent } from "react";
-import { useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
+import { ArrowLeft, Car, Headphones, ShieldCheck } from "lucide-react";
 import { api } from "../lib/api";
 import type { UserRole } from "../types";
+import AppShell from "../components/layout/AppShell";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import Field from "../components/ui/Field";
+import { useToast } from "../components/ui/Toast";
 
-const ROLE_LABEL: Record<UserRole, string> = {
-  admin: "Quản trị viên",
-  dispatcher: "Điều phối viên",
-  driver: "Tài xế",
-};
+const ROLES: {
+  value: UserRole;
+  label: string;
+  description: string;
+  icon: React.ReactNode;
+}[] = [
+  {
+    value: "dispatcher",
+    label: "Điều phối viên",
+    description: "Thêm khách, ghép chuyến, giao xe cho tài xế",
+    icon: <Headphones size={16} aria-hidden="true" />,
+  },
+  {
+    value: "driver",
+    label: "Tài xế",
+    description: "Chỉ xem chuyến được giao cho mình",
+    icon: <Car size={16} aria-hidden="true" />,
+  },
+  {
+    value: "admin",
+    label: "Quản trị",
+    description: "Toàn quyền, kể cả tạo tài khoản nhân viên",
+    icon: <ShieldCheck size={16} aria-hidden="true" />,
+  },
+];
 
 export default function CreateUserPage() {
-  const navigate = useNavigate();
+  const toast = useToast();
   const [fullName, setFullName] = useState("");
   const [phone, setPhone] = useState("");
   const [password, setPassword] = useState("");
   const [role, setRole] = useState<UserRole>("dispatcher");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [success, setSuccess] = useState<string | null>(null);
 
   const handleSubmit = async (e: FormEvent) => {
     e.preventDefault();
     setError(null);
-    setSuccess(null);
     setSubmitting(true);
     try {
       const created = await api.auth.register({
@@ -31,125 +55,108 @@ export default function CreateUserPage() {
         password,
         role,
       });
-      setSuccess(`Đã tạo tài khoản cho ${created.full_name} (${ROLE_LABEL[created.role]}).`);
+      toast(`Đã tạo tài khoản cho ${created.full_name}.`, "success");
       setFullName("");
       setPhone("");
       setPassword("");
       setRole("dispatcher");
     } catch (err: any) {
-      setError(err?.response?.data?.detail ?? "Không thể tạo tài khoản");
+      setError(err?.response?.data?.detail ?? "Không tạo được tài khoản.");
     } finally {
       setSubmitting(false);
     }
   };
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--paper)" }}>
-      <div className="max-w-md mx-auto px-6 py-8">
-        <button
-          onClick={() => navigate("/")}
-          className="text-xs underline mb-4"
-          style={{ color: "var(--mute)" }}
-        >
-          ← Quay lại bảng điều phối
-        </button>
-
-        <div
-          className="text-xs tracking-widest mb-1"
-          style={{ color: "var(--amber)", fontFamily: "'JetBrains Mono', monospace" }}
-        >
-          QUẢN TRỊ
-        </div>
-        <h1
-          className="text-2xl font-bold mb-6"
-          style={{ fontFamily: "'Sora', sans-serif" }}
-        >
-          Tạo tài khoản nhân viên
-        </h1>
-
-        <form
-          onSubmit={handleSubmit}
-          className="bg-white border rounded p-6 space-y-4"
-          style={{ borderColor: "var(--line)" }}
-        >
-          <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--mute)" }}>
-              Họ tên
-            </label>
-            <input
+    <AppShell
+      title="Thêm nhân viên"
+      subtitle="Tạo tài khoản đăng nhập cho điều phối viên, tài xế hoặc quản trị viên."
+      width="narrow"
+      actions={
+        <Link to="/">
+          <Button variant="ghost" iconLeft={<ArrowLeft size={15} aria-hidden="true" />}>
+            Về bảng điều phối
+          </Button>
+        </Link>
+      }
+    >
+      <Card className="p-5 sm:p-6">
+        <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+          <div className="grid sm:grid-cols-2 gap-4">
+            <Field
+              label="Họ và tên"
               value={fullName}
               onChange={(e) => setFullName(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm"
-              style={{ borderColor: "var(--line)" }}
               required
             />
-          </div>
-
-          <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--mute)" }}>
-              Số điện thoại
-            </label>
-            <input
+            <Field
+              label="Số điện thoại"
+              type="tel"
+              inputMode="tel"
               value={phone}
               onChange={(e) => setPhone(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm"
-              style={{ borderColor: "var(--line)" }}
+              hint="Dùng để đăng nhập"
               required
             />
           </div>
 
-          <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--mute)" }}>
-              Mật khẩu tạm thời
-            </label>
-            <input
-              type="password"
-              value={password}
-              onChange={(e) => setPassword(e.target.value)}
-              className="w-full border rounded px-3 py-2 text-sm"
-              style={{ borderColor: "var(--line)" }}
-              minLength={8}
-              required
-            />
-          </div>
+          <Field
+            label="Mật khẩu tạm thời"
+            type="password"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            minLength={8}
+            hint="Tối thiểu 8 ký tự. Nhân viên nên đổi sau lần đăng nhập đầu."
+            error={error ?? undefined}
+            required
+          />
 
-          <div>
-            <label className="block text-xs mb-1" style={{ color: "var(--mute)" }}>
+          <fieldset className="border-0 p-0 m-0">
+            <legend className="text-[12px] font-medium mb-2 text-[var(--text-secondary)]">
               Vai trò
-            </label>
-            <select
-              value={role}
-              onChange={(e) => setRole(e.target.value as UserRole)}
-              className="w-full border rounded px-3 py-2 text-sm"
-              style={{ borderColor: "var(--line)" }}
-            >
-              <option value="dispatcher">Điều phối viên</option>
-              <option value="driver">Tài xế</option>
-              <option value="admin">Quản trị viên</option>
-            </select>
+            </legend>
+            <div className="space-y-2">
+              {ROLES.map((r) => (
+                <button
+                  key={r.value}
+                  type="button"
+                  onClick={() => setRole(r.value)}
+                  aria-pressed={role === r.value}
+                  className={[
+                    "w-full text-left p-3 rounded-[var(--radius-md)] border flex items-start gap-3",
+                    "transition-all duration-[var(--duration-fast)]",
+                    role === r.value
+                      ? "border-[var(--brand-blue)] bg-[var(--brand-blue-subtle)]"
+                      : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--text-tertiary)]",
+                  ].join(" ")}
+                >
+                  <span
+                    className={
+                      role === r.value
+                        ? "text-[var(--brand-blue)] mt-0.5"
+                        : "text-[var(--text-tertiary)] mt-0.5"
+                    }
+                  >
+                    {r.icon}
+                  </span>
+                  <span>
+                    <span className="block text-sm font-medium">{r.label}</span>
+                    <span className="block text-xs text-[var(--text-tertiary)] mt-0.5">
+                      {r.description}
+                    </span>
+                  </span>
+                </button>
+              ))}
+            </div>
+          </fieldset>
+
+          <div className="flex justify-end pt-1">
+            <Button type="submit" variant="primary" size="lg" loading={submitting}>
+              Tạo tài khoản
+            </Button>
           </div>
-
-          {error && (
-            <div className="text-sm" style={{ color: "var(--coral)" }}>
-              {error}
-            </div>
-          )}
-          {success && (
-            <div className="text-sm" style={{ color: "var(--teal)" }}>
-              ✓ {success}
-            </div>
-          )}
-
-          <button
-            type="submit"
-            disabled={submitting}
-            className="w-full rounded py-2 text-sm font-semibold text-white"
-            style={{ background: "var(--ink)", opacity: submitting ? 0.6 : 1 }}
-          >
-            {submitting ? "Đang tạo..." : "Tạo tài khoản"}
-          </button>
         </form>
-      </div>
-    </div>
+      </Card>
+    </AppShell>
   );
 }

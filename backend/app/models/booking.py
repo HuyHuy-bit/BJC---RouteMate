@@ -2,7 +2,7 @@ import uuid
 from datetime import datetime
 
 from geoalchemy2 import Geography
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Integer
+from sqlalchemy import Boolean, DateTime, Enum, Float, ForeignKey, Integer
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
@@ -62,9 +62,30 @@ class Booking(Base, TimestampMixin):
     )
 
     status: Mapped[BookingStatus] = mapped_column(
-        Enum(BookingStatus, name="booking_status"), default=BookingStatus.queued
+        Enum(BookingStatus, name="booking_status"),
+        default=BookingStatus.queued,
+        index=True,
     )
     stop_order: Mapped[int | None] = mapped_column(Integer, nullable=True)
+
+    # Direct point-to-point ride time for this booking alone, computed
+    # once at creation and never recomputed (the address pair does not
+    # change). Detour is measured as (in-car time) minus this baseline,
+    # so the per-passenger service guarantee is only enforceable because
+    # this is stored. Must come from
+    # app/services/pool_insertion.py:compute_solo_baseline — a baseline
+    # produced by any other method makes every detour figure meaningless.
+    solo_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
+    solo_distance_meters: Mapped[float | None] = mapped_column(Float, nullable=True)
+
+    # Filled when the pool seals, so the customer gets a firm ETA rather
+    # than silence.
+    estimated_pickup_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    estimated_dropoff_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
 
     customer: Mapped["Customer"] = relationship(back_populates="bookings")
     trip: Mapped["Trip | None"] = relationship(back_populates="bookings")

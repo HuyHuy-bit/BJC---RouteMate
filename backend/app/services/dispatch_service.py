@@ -1,0 +1,436 @@
+"""
+Connects the pure matching/dispatch algorithms to the database.
+
+The algorithm modules (pool_insertion, dispatch_engine) are deliberately
+free of SQLAlchemy so they stay testable without a database. This module
+is the only place that translates between ORM rows and those pure
+dataclasses, and the only place that writes dispatch decisions.
+"""
+
+import logging
+from datetime import datetime, timedelta, timezone
+from uuid import UUID
+
+from geoalchemy2.elements import WKTElement
+from geoalchemy2.shape import to_shape
+from sqlalchemy import func, select
+from sqlalchemy.orm import Session
+
+from app.core.dispatch_config import (
+    MAX_PASSENGERS,
+    MAX_POOL_WAIT_MINUTES,
+    PICKUP_WINDOW_MINUTES,
+)
+from app.models.booking import Booking
+from app.models.dispatch_event import DispatchEvent
+from app.models.enums import (
+    BookingDirection,
+    BookingStatus,
+    DispatchEventType,
+    TripStatus,
+    VehicleStatus,
+)
+from app.models.trip import Trip
+from app.models.vehicle import Vehicle
+from app.services.dispatch_engine import (
+    PoolSnapshot,
+    SealDecision,
+    departure_deadline,
+    evaluate_pool,
+    find_merge_candidate,
+)
+from app.services.pool_insertion import (
+    PoolMember,
+    compute_solo_baseline,
+    evaluate_insertion,
+)
+from app.services.routing import routing_service
+
+logger = logging.getLogger(__name__)
+
+# Pools whose centroid is further than this from the booking are not
+# worth evaluating. Runs as an indexed PostGIS query, so it costs
+# nothing compared to a routing call.
+CANDIDATE_RADIUS_METERS = 30_000
+
+
+def _coords(booking: Booking) -> tuple[tuple[float, float], tuple[float, float]]:
+    p = to_shape(booking.pickup_point)
+    d = to_shape(booking.dropoff_point)
+    return (p.y, p.x), (d.y, d.x)
+
+
+def _to_member(booking: Booking) -> PoolMember:
+    pickup, dropoff = _coords(booking)
+    return PoolMember(
+        booking_id=booking.id,
+        pickup=pickup,
+        dropoff=dropoff,
+        requested_pickup_at=booking.requested_pickup_at,
+        solo_duration_seconds=booking.solo_duration_seconds or 0.0,
+    )
+
+
+def log_event(
+    db: Session,
+    event_type: DispatchEventType,
+    *,
+    trip_id: UUID | None = None,
+    booking_id: UUID | None = None,
+    vehicle_id: UUID | None = None,
+    actor_user_id: UUID | None = None,
+    reason: str | None = None,
+    details: dict | None = None,
+) -> None:
+    db.add(
+        DispatchEvent(
+            event_type=event_type,
+            trip_id=trip_id,
+            booking_id=booking_id,
+            vehicle_id=vehicle_id,
+            actor_user_id=actor_user_id,
+            is_automatic=actor_user_id is None,
+            reason=reason,
+            details=details,
+        )
+    )
+
+
+def ensure_baseline(db: Session, booking: Booking) -> None:
+    """
+    Computes and stores the solo trip baseline if missing. Idempotent —
+    the address pair never changes, so this runs once per booking.
+    """
+    if booking.solo_duration_seconds is not None:
+        return
+    pickup, dropoff = _coords(booking)
+    leg = routing_service.leg(pickup, dropoff)
+    booking.solo_duration_seconds = leg.duration_seconds
+    booking.solo_distance_meters = leg.distance_meters
+
+
+def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
+    """Recomputes centroid, deadline, and cached route after a change."""
+    active = [
+        b
+        for b in trip.bookings
+        if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+    ]
+    if not active:
+        return
+
+    pickups = [_coords(b)[0] for b in active]
+    lat = sum(p[0] for p in pickups) / len(pickups)
+    lng = sum(p[1] for p in pickups) / len(pickups)
+    trip.centroid = WKTElement(f"POINT({lng} {lat})", srid=4326)
+
+    earliest = min(b.requested_pickup_at for b in active)
+    trip.departure_deadline = earliest + timedelta(minutes=MAX_POOL_WAIT_MINUTES)
+
+    members = [_to_member(b) for b in active]
+    if len(members) == 1:
+        m = members[0]
+        route = routing_service.route([m.pickup, m.dropoff])
+    else:
+        # Reuse the insertion evaluator's ordering for a consistent route.
+        result = evaluate_insertion(members[:-1], members[-1])
+        if result.feasible and result.ordered_stops:
+            route = routing_service.route([s.coord for s in result.ordered_stops])
+            for rank, stop in enumerate(
+                [s for s in result.ordered_stops if s.kind == "pickup"], start=1
+            ):
+                for b in active:
+                    if b.id == stop.booking_id:
+                        b.stop_order = rank
+        else:
+            route = routing_service.route(
+                [c for m in members for c in (m.pickup, m.dropoff)]
+            )
+
+    trip.route_distance_meters = route.total_distance_meters
+    trip.route_duration_seconds = route.total_duration_seconds
+    trip.route_geometry = route.geometry
+    trip.route_is_estimate = route.is_estimate
+
+
+def find_pool_for_booking(db: Session, booking: Booking) -> Trip | None:
+    """
+    The core of continuous matching: try to place this booking into an
+    already-forming pool before opening a new one.
+
+    The previous design could not do this at all — pools were built in
+    one batch pass and frozen, so a booking arriving a minute later
+    started a second car even when it fit the first perfectly.
+    """
+    ensure_baseline(db, booking)
+    candidate = _to_member(booking)
+
+    window = timedelta(minutes=PICKUP_WINDOW_MINUTES)
+    pickup, _ = _coords(booking)
+    point = WKTElement(f"POINT({pickup[1]} {pickup[0]})", srid=4326)
+
+    # Cheap, indexed prefilter — direction, status, time window, and
+    # coarse proximity — before spending a single routing call.
+    stmt = (
+        select(Trip)
+        .where(Trip.status == TripStatus.forming)
+        .where(Trip.direction == booking.direction)
+        .where(
+            (Trip.departure_deadline.is_(None))
+            | (Trip.departure_deadline >= booking.requested_pickup_at - window)
+        )
+        .where(
+            (Trip.centroid.is_(None))
+            | (func.ST_DWithin(Trip.centroid, point, CANDIDATE_RADIUS_METERS))
+        )
+    )
+    pools = db.execute(stmt).scalars().all()
+
+    best_trip: Trip | None = None
+    best_score = float("inf")
+    best_reason = "no forming pools in range"
+
+    for trip in pools:
+        members = [
+            _to_member(b)
+            for b in trip.bookings
+            if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+            and b.id != booking.id
+        ]
+        if len(members) >= MAX_PASSENGERS:
+            continue
+        if any(m.solo_duration_seconds <= 0 for m in members):
+            continue  # baseline missing; skip rather than compute garbage
+
+        result = evaluate_insertion(
+            members, candidate, departure_deadline=trip.departure_deadline
+        )
+        if result.feasible and result.score is not None and result.score < best_score:
+            best_trip, best_score = trip, result.score
+        elif not result.feasible:
+            best_reason = result.reason or best_reason
+
+    if best_trip is None:
+        logger.info("no pool for booking %s: %s", booking.id, best_reason)
+        return None
+    return best_trip
+
+
+def assign_booking(db: Session, booking: Booking) -> Trip:
+    """Places a booking into the best pool, or opens a new one."""
+    trip = find_pool_for_booking(db, booking)
+
+    if trip is None:
+        trip = Trip(
+            direction=booking.direction,
+            status=TripStatus.forming,
+            departure_deadline=booking.requested_pickup_at
+            + timedelta(minutes=MAX_POOL_WAIT_MINUTES),
+        )
+        db.add(trip)
+        db.flush()
+        log_event(
+            db,
+            DispatchEventType.pool_created,
+            trip_id=trip.id,
+            booking_id=booking.id,
+            reason="no existing pool was a viable fit",
+        )
+
+    booking.trip_id = trip.id
+    booking.status = BookingStatus.matched
+    db.flush()
+
+    _refresh_pool_geometry(db, trip)
+    log_event(
+        db,
+        DispatchEventType.booking_pooled,
+        trip_id=trip.id,
+        booking_id=booking.id,
+        details={"passengers": len(trip.bookings)},
+    )
+    return trip
+
+
+def _pool_snapshot(trip: Trip) -> PoolSnapshot:
+    active = [
+        b
+        for b in trip.bookings
+        if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+    ]
+    earliest = (
+        min(b.requested_pickup_at for b in active) if active else trip.created_at
+    )
+    return PoolSnapshot(
+        pool_id=trip.id,
+        direction=(
+            "return" if trip.direction == BookingDirection.return_leg else "outbound"
+        ),
+        passenger_count=len(active),
+        earliest_requested_pickup=earliest,
+        created_at=trip.created_at,
+        is_private=any(b.is_private for b in active),
+    )
+
+
+def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
+    """
+    Commits a physical car. Returns None when the fleet is fully
+    committed — which the previous design could not even detect, since
+    it had no concept of vehicles at all.
+    """
+    vehicle = (
+        db.execute(
+            select(Vehicle)
+            .where(Vehicle.status == VehicleStatus.available)
+            .limit(1)
+        )
+        .scalars()
+        .first()
+    )
+    if vehicle is None:
+        return None
+
+    vehicle.status = VehicleStatus.on_trip
+    trip.vehicle_id = vehicle.id
+    trip.vehicle_label = vehicle.label or vehicle.plate_number
+    if trip.driver_id is None and vehicle.default_driver_id:
+        trip.driver_id = vehicle.default_driver_id
+    return vehicle
+
+
+def _apply_etas(trip: Trip) -> None:
+    """
+    Writes firm pickup/dropoff estimates once a pool seals, so customers
+    get a real time instead of silence.
+    """
+    active = sorted(
+        [
+            b
+            for b in trip.bookings
+            if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+        ],
+        key=lambda b: (b.stop_order or 0),
+    )
+    if not active:
+        return
+    start = min(b.requested_pickup_at for b in active)
+    per_stop = (trip.route_duration_seconds or 0) / max(1, len(active) * 2)
+    for i, b in enumerate(active):
+        b.estimated_pickup_at = start + timedelta(seconds=per_stop * i)
+        b.estimated_dropoff_at = start + timedelta(
+            seconds=(trip.route_duration_seconds or 0)
+        )
+
+
+def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
+    """
+    One automated pass over every forming pool. This is what removes the
+    human from the loop: previously nothing was ever dispatched unless
+    someone clicked a button.
+    """
+    now = now or datetime.now(timezone.utc)
+    trips = (
+        db.execute(select(Trip).where(Trip.status == TripStatus.forming))
+        .scalars()
+        .all()
+    )
+    snapshots = {t.id: _pool_snapshot(t) for t in trips}
+
+    sealed = escalated = merged = 0
+    no_vehicle = 0
+
+    for trip in trips:
+        snap = snapshots[trip.id]
+        if snap.passenger_count == 0:
+            continue
+
+        decision = evaluate_pool(snap, now)
+
+        if decision.decision is SealDecision.WAIT:
+            continue
+
+        if decision.decision is SealDecision.ESCALATE:
+            # Before stranding anyone, try merging with another
+            # under-filled pool going the same way — that serves both
+            # sets of customers AND removes a vehicle from the road.
+            others = [
+                s
+                for tid, s in snapshots.items()
+                if tid != trip.id and s.passenger_count > 0
+            ]
+            partner = find_merge_candidate(snap, others)
+            if partner is not None:
+                partner_trip = next(t for t in trips if t.id == partner.pool_id)
+                for b in list(trip.bookings):
+                    if b.status not in (
+                        BookingStatus.cancelled,
+                        BookingStatus.no_show,
+                    ):
+                        b.trip_id = partner_trip.id
+                trip.status = TripStatus.cancelled
+                db.flush()
+                _refresh_pool_geometry(db, partner_trip)
+                log_event(
+                    db,
+                    DispatchEventType.pool_merged,
+                    trip_id=partner_trip.id,
+                    reason=f"merged under-filled pool {trip.id} at deadline",
+                    details={"absorbed_pool": str(trip.id)},
+                )
+                merged += 1
+                continue
+
+            log_event(
+                db,
+                DispatchEventType.pool_escalated,
+                trip_id=trip.id,
+                reason=decision.reason,
+                details={"options": decision.options},
+            )
+            escalated += 1
+            continue
+
+        # SEAL
+        vehicle = _assign_vehicle(db, trip)
+        if vehicle is None:
+            # Fleet fully committed. Leave forming and surface it rather
+            # than promising a ride that cannot run.
+            log_event(
+                db,
+                DispatchEventType.pool_sealed,
+                trip_id=trip.id,
+                reason="ready to seal but no vehicle available",
+            )
+            no_vehicle += 1
+            continue
+
+        trip.status = TripStatus.assigned
+        trip.sealed_at = now
+        _refresh_pool_geometry(db, trip)
+        _apply_etas(trip)
+        for b in trip.bookings:
+            if b.status == BookingStatus.matched:
+                b.status = BookingStatus.locked
+
+        log_event(
+            db,
+            DispatchEventType.pool_sealed,
+            trip_id=trip.id,
+            vehicle_id=vehicle.id,
+            reason=decision.reason,
+            details={"passengers": snap.passenger_count},
+        )
+        sealed += 1
+
+    db.commit()
+    summary = {
+        "pools_examined": len(trips),
+        "sealed": sealed,
+        "escalated": escalated,
+        "merged": merged,
+        "blocked_no_vehicle": no_vehicle,
+    }
+    if sealed or escalated or merged or no_vehicle:
+        logger.info("dispatch cycle: %s", summary)
+    return summary

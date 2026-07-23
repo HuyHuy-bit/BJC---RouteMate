@@ -28,10 +28,19 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         is_private=payload.is_private,
         price_vnd=price_for(payload.is_private),
         # Inferred automatically, not customer-supplied — see
-        # app/services/geo.py:classify_direction. This business only
-        # serves the Bắc Giang <-> Hà Nội corridor, so nearest-hub is a
-        # reliable signal without asking the customer to specify it.
-        direction=BookingDirection(classify_direction(payload.pickup_lat, payload.pickup_lng)),
+        # app/services/geo.py:classify_direction. Direction is decided by
+        # which way the passenger moves ALONG the corridor (comparing
+        # pickup and dropoff projections), not by which hub the pickup
+        # happens to sit nearer — the latter misclassified every booking
+        # from midpoint towns like Bắc Ninh.
+        direction=BookingDirection(
+            classify_direction(
+                payload.pickup_lat,
+                payload.pickup_lng,
+                payload.dropoff_lat,
+                payload.dropoff_lng,
+            )
+        ),
     )
     db.add(booking)
     db.flush()

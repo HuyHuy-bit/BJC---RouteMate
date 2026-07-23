@@ -2,6 +2,7 @@ from fastapi import APIRouter
 from sqlalchemy import text
 
 from app.db.session import engine
+from app.services.routing import routing_service
 
 router = APIRouter(tags=["health"])
 
@@ -15,4 +16,14 @@ def health_check():
     except Exception:
         db_ok = False
 
-    return {"status": "ok" if db_ok else "degraded", "database": db_ok}
+    # Routing health is operationally important: a wide-open circuit or a
+    # collapsing cache hit rate both mean matching quality is silently
+    # degrading before anyone notices bad dispatches.
+    routing = routing_service.health()
+
+    healthy = db_ok and not routing["circuit_open"]
+    return {
+        "status": "ok" if healthy else "degraded",
+        "database": db_ok,
+        "routing": routing,
+    }

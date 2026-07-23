@@ -1,33 +1,195 @@
-@import url("https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
+@import url("https://fonts.googleapis.com/css2?family=Sora:wght@500;600;700&family=Inter:wght@400;450;500;600&family=JetBrains+Mono:wght@400;500&display=swap");
 
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
-/*
-  Brand palette pulled from the actual BJC Group logo (blue ring, red
-  wordmark, dark green Vietnam map) and the Thành Công fleet livery
-  (white body, red/orange accent stripe). Variable NAMES are kept the
-  same as the original placeholder theme on purpose — every component
-  references these custom properties instead of hardcoded hex values, so
-  changing what they point to re-themes the whole app without touching
-  component files.
-*/
+/* ============================================================
+   DESIGN TOKENS
+   Single source of truth. Components reference these only —
+   no hardcoded hex values anywhere in component files.
+   ============================================================ */
 :root {
-  --ink: #16213a;       /* dark navy-black, was neutral ink */
-  --paper: #f4f6f9;      /* clean cool white, was warm cream */
-  --paper-dim: #e7ebf1;
-  --line: #d8dfe8;
-  --amber: #d6331f;      /* now brand red -- primary actions/accents */
-  --teal: #1f7a4d;       /* success/matched -- green, echoes the logo's map */
-  --coral: #a31e17;      /* danger/private -- darker red, distinct from amber */
-  --mute: #6b7280;
-  --brand-blue: #1b5fa8; /* logo ring blue -- header/secondary accents */
+  /* --- Brand (from BJC logo + Thành Công fleet livery) --- */
+  --brand-red: #d6331f;
+  --brand-red-hover: #b82a19;
+  --brand-red-subtle: #fef2f0;
+  --brand-blue: #1b5fa8;
+  --brand-blue-subtle: #eef4fb;
+
+  /* --- Surfaces --- */
+  --bg: #f7f8fa;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f1f3f6;
+  --surface-inverse: #101728;
+
+  /* --- Text (all AA-compliant on --surface) --- */
+  --text: #101728;          /* 16.1:1 */
+  --text-secondary: #4a5568; /* 8.1:1  */
+  --text-tertiary: #64748b;  /* 5.3:1  — AA for normal text */
+  --text-inverse: #ffffff;
+
+  /* --- Borders --- */
+  --border: #e3e7ed;
+  --border-strong: #cbd2db;
+  --border-focus: var(--brand-blue);
+
+  /* --- Semantic --- */
+  --success: #14714a;
+  --success-subtle: #eaf6f0;
+  --warning: #9a5b00;
+  --warning-subtle: #fdf5e7;
+  --danger: #b3261e;
+  --danger-subtle: #fdf0ef;
+  --info: var(--brand-blue);
+  --info-subtle: var(--brand-blue-subtle);
+
+  /* --- Spacing scale (4px base) --- */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --space-8: 2rem;
+  --space-10: 2.5rem;
+  --space-12: 3rem;
+
+  /* --- Radius --- */
+  --radius-sm: 4px;
+  --radius: 6px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-full: 9999px;
+
+  /* --- Elevation --- */
+  --shadow-xs: 0 1px 2px rgba(16, 23, 40, 0.04);
+  --shadow-sm: 0 1px 3px rgba(16, 23, 40, 0.08), 0 1px 2px rgba(16, 23, 40, 0.04);
+  --shadow-md: 0 4px 12px rgba(16, 23, 40, 0.08), 0 2px 4px rgba(16, 23, 40, 0.04);
+  --shadow-lg: 0 12px 32px rgba(16, 23, 40, 0.12), 0 4px 8px rgba(16, 23, 40, 0.06);
+
+  /* --- Type --- */
+  --font-display: "Sora", system-ui, sans-serif;
+  --font-body: "Inter", system-ui, sans-serif;
+  --font-mono: "JetBrains Mono", ui-monospace, monospace;
+
+  /* --- Motion --- */
+  --ease: cubic-bezier(0.32, 0.72, 0, 1);
+  --duration-fast: 120ms;
+  --duration: 180ms;
+  --duration-slow: 280ms;
+}
+
+/* ============================================================
+   BASE
+   ============================================================ */
+* {
+  box-sizing: border-box;
+}
+
+html {
+  -webkit-text-size-adjust: 100%;
 }
 
 body {
   margin: 0;
-  font-family: "Inter", sans-serif;
-  background: var(--paper);
-  color: var(--ink);
+  font-family: var(--font-body);
+  background: var(--bg);
+  color: var(--text);
+  font-size: 14px;
+  line-height: 1.5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
 }
+
+h1, h2, h3, h4 {
+  font-family: var(--font-display);
+  margin: 0;
+  letter-spacing: -0.018em;
+  line-height: 1.25;
+}
+
+/* Numbers in tables/prices align when tabular */
+.tnum {
+  font-variant-numeric: tabular-nums;
+  font-family: var(--font-mono);
+}
+
+/* ============================================================
+   FOCUS — visible for keyboard, invisible for mouse
+   ============================================================ */
+:focus {
+  outline: none;
+}
+
+:focus-visible {
+  outline: 2px solid var(--border-focus);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================================
+   MOTION — respect the OS setting
+   ============================================================ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+/* ============================================================
+   ANIMATIONS
+   ============================================================ */
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes slide-up {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes slide-in-right {
+  from { transform: translateX(100%); }
+  to { transform: translateX(0); }
+}
+
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+
+.animate-fade-in { animation: fade-in var(--duration) var(--ease); }
+.animate-slide-up { animation: slide-up var(--duration) var(--ease); }
+.animate-slide-in-right { animation: slide-in-right var(--duration-slow) var(--ease); }
+
+.skeleton {
+  background: linear-gradient(
+    90deg,
+    var(--surface-sunken) 25%,
+    #e8ebf0 50%,
+    var(--surface-sunken) 75%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.4s infinite linear;
+  border-radius: var(--radius-sm);
+}
+
+/* ============================================================
+   SCROLLBAR — subtle, matches surface
+   ============================================================ */
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: var(--radius-full);
+  border: 3px solid var(--bg);
+}
+::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }

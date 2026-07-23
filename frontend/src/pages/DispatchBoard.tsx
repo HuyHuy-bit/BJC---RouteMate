@@ -1,21 +1,37 @@
+import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { useState } from "react";
-import { Link } from "react-router-dom";
+import { Plus, Shuffle } from "lucide-react";
 import { api } from "../lib/api";
-import { useAuth } from "../context/AuthContext";
+import type { BookingStatus } from "../types";
+import AppShell from "../components/layout/AppShell";
 import BookingForm from "../components/BookingForm";
 import BookingsList from "../components/BookingsList";
 import TripsPanel from "../components/TripsPanel";
+import Button from "../components/ui/Button";
+import Card from "../components/ui/Card";
+import SlideOver from "../components/ui/SlideOver";
+import { useToast } from "../components/ui/Toast";
+import { fmtVnd } from "../lib/format";
 
 // Fixed rather than dispatcher-adjustable — 15km covers this business's
-// service area comfortably without needing a technical knob in the UI.
+// service area without putting a technical knob in an operational UI.
 const MAX_DETOUR_METERS = 15000;
 
+type Filter = "all" | BookingStatus;
+
+const FILTERS: { value: Filter; label: string }[] = [
+  { value: "all", label: "Tất cả" },
+  { value: "queued", label: "Chờ ghép" },
+  { value: "waiting", label: "Chưa đủ khách" },
+  { value: "matched", label: "Đã ghép xe" },
+];
+
 export default function DispatchBoard() {
-  const { user, logout } = useAuth();
+  const toast = useToast();
   const queryClient = useQueryClient();
   const [running, setRunning] = useState(false);
-  const [runError, setRunError] = useState<string | null>(null);
+  const [formOpen, setFormOpen] = useState(false);
+  const [filter, setFilter] = useState<Filter>("all");
 
   const bookingsQuery = useQuery({
     queryKey: ["bookings"],
@@ -31,111 +47,175 @@ export default function DispatchBoard() {
     queryClient.invalidateQueries({ queryKey: ["trips"] });
   };
 
+  const bookings = bookingsQuery.data ?? [];
+  const trips = tripsQuery.data ?? [];
+
+  const stats = useMemo(() => {
+    const active = bookings.filter((b) => b.status !== "cancelled");
+    return {
+      waiting: active.filter((b) => b.status === "queued" || b.status === "waiting")
+        .length,
+      matched: active.filter((b) => b.status === "matched").length,
+      cars: trips.length,
+      revenue: trips.reduce(
+        (sum, t) => sum + t.bookings.reduce((s, b) => s + b.price_vnd, 0),
+        0
+      ),
+    };
+  }, [bookings, trips]);
+
+  const visibleBookings = useMemo(
+    () => (filter === "all" ? bookings : bookings.filter((b) => b.status === filter)),
+    [bookings, filter]
+  );
+
   const runMatching = async () => {
     setRunning(true);
-    setRunError(null);
     try {
-      await api.dispatch.run(MAX_DETOUR_METERS);
+      const result = await api.dispatch.run(MAX_DETOUR_METERS);
+      toast(
+        result.trips_created > 0
+          ? `Đã ghép ${result.trips_created} xe.`
+          : "Chưa ghép được xe nào. Cần thêm khách cùng tuyến, cùng ngày.",
+        result.trips_created > 0 ? "success" : "info"
+      );
       refreshAll();
     } catch (err: any) {
-      setRunError(err?.response?.data?.detail ?? "Không thể ghép chuyến");
+      toast(err?.response?.data?.detail ?? "Không ghép được chuyến.", "error");
     } finally {
       setRunning(false);
     }
   };
 
   return (
-    <div className="min-h-screen" style={{ background: "var(--paper)" }}>
-      <div className="max-w-5xl mx-auto px-6 py-7">
-        <div
-          className="flex justify-between items-end mb-6 pb-3 border-b-2"
-          style={{ borderColor: "var(--ink)" }}
-        >
-          <div className="flex items-center gap-3">
-            <img
-              src="/bjc-logo.jpg"
-              alt="BJC Group"
-              className="w-10 h-10 rounded-full object-cover"
-            />
-            <div>
-              <div
-                className="text-xs tracking-widest mb-1"
-                style={{ color: "var(--coral)", fontFamily: "'JetBrains Mono', monospace" }}
-              >
-                THÀNH CÔNG LIMOUSINE · BJC GROUP
-              </div>
-              <h1
-                className="text-2xl font-bold"
-                style={{ fontFamily: "'Sora', sans-serif" }}
-              >
-                Bảng điều phối · Bắc Giang ⇄ Hà Nội
-              </h1>
-            </div>
-          </div>
-          <div className="text-right text-sm">
-            <div className="mb-2" style={{ color: "var(--mute)" }}>{user?.full_name}</div>
-            <div className="flex gap-2 justify-end">
-              {user?.role === "admin" && (
-                <Link
-                  to="/admin/users/new"
-                  className="text-xs font-medium rounded px-3 py-1.5 border"
-                  style={{ color: "var(--brand-blue)", borderColor: "var(--brand-blue)" }}
-                >
-                  + Tài khoản nhân viên
-                </Link>
-              )}
-              <button
-                onClick={logout}
-                className="text-xs font-medium rounded px-3 py-1.5 border"
-                style={{ color: "var(--coral)", borderColor: "var(--coral)" }}
-              >
-                Đăng xuất
-              </button>
-            </div>
-          </div>
-        </div>
-
-        <div className="mb-5">
-          <BookingForm onCreated={refreshAll} />
-        </div>
-
-        <div
-          className="flex items-center justify-center mb-5 px-4 py-3 rounded"
-          style={{ background: "var(--ink)" }}
-        >
-          <button
+    <AppShell
+      title="Bảng điều phối"
+      subtitle="Bắc Giang ⇄ Hà Nội"
+      actions={
+        <>
+          <Button
+            variant="secondary"
+            iconLeft={<Plus size={15} aria-hidden="true" />}
+            onClick={() => setFormOpen(true)}
+          >
+            Thêm khách
+          </Button>
+          <Button
+            variant="primary"
+            iconLeft={<Shuffle size={15} aria-hidden="true" />}
             onClick={runMatching}
-            disabled={running}
-            className="px-4 py-2 rounded text-sm font-semibold text-white"
-            style={{ background: "var(--amber)", opacity: running ? 0.6 : 1 }}
+            loading={running}
           >
-            {running ? "Đang ghép..." : "Ghép chuyến"}
-          </button>
-        </div>
-        {runError && (
-          <div className="text-sm mb-4" style={{ color: "var(--coral)" }}>
-            {runError}
-          </div>
-        )}
-
-        <div className="mb-6">
-          <div
-            className="text-sm font-semibold mb-2"
-            style={{ fontFamily: "'Sora', sans-serif" }}
-          >
-            Danh sách khách ({bookingsQuery.data?.length ?? 0})
-          </div>
-          {bookingsQuery.isLoading ? (
-            <div className="text-sm" style={{ color: "var(--mute)" }}>
-              Đang tải...
-            </div>
-          ) : (
-            <BookingsList bookings={bookingsQuery.data ?? []} onChanged={refreshAll} />
-          )}
-        </div>
-
-        <TripsPanel trips={tripsQuery.data ?? []} />
+            Ghép chuyến
+          </Button>
+        </>
+      }
+    >
+      {/* Stats — the operational picture, above everything else.
+          Previously the form occupied this space and pushed the actual
+          state of the business below the fold. */}
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+        <Stat label="Khách chờ ghép" value={stats.waiting} tone="warning" />
+        <Stat label="Khách đã ghép" value={stats.matched} tone="success" />
+        <Stat label="Xe đang chạy" value={stats.cars} />
+        <Stat label="Doanh thu dự kiến" value={fmtVnd(stats.revenue)} />
       </div>
-    </div>
+
+      <div className="grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] gap-5 items-start">
+        {/* Queue */}
+        <Card className="overflow-hidden">
+          <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between gap-2">
+            <h2 className="text-sm font-semibold">
+              Hàng chờ
+              <span className="text-[var(--text-tertiary)] font-normal ml-1.5 tnum">
+                {visibleBookings.length}
+              </span>
+            </h2>
+          </div>
+
+          <div
+            className="flex gap-1 px-3 py-2 border-b border-[var(--border)] overflow-x-auto"
+            role="tablist"
+            aria-label="Lọc theo trạng thái"
+          >
+            {FILTERS.map((f) => (
+              <button
+                key={f.value}
+                role="tab"
+                aria-selected={filter === f.value}
+                onClick={() => setFilter(f.value)}
+                className={[
+                  "px-2.5 h-7 rounded-[var(--radius-full)] text-xs font-medium whitespace-nowrap transition-colors",
+                  filter === f.value
+                    ? "bg-[var(--surface-inverse)] text-white"
+                    : "text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)]",
+                ].join(" ")}
+              >
+                {f.label}
+              </button>
+            ))}
+          </div>
+
+          <div className="max-h-[calc(100vh-24rem)] overflow-y-auto">
+            <BookingsList
+              bookings={visibleBookings}
+              loading={bookingsQuery.isLoading}
+              onChanged={refreshAll}
+              onAddBooking={() => setFormOpen(true)}
+            />
+          </div>
+        </Card>
+
+        {/* Cars */}
+        <section aria-labelledby="cars-heading">
+          <div className="flex items-center justify-between mb-3">
+            <h2 id="cars-heading" className="text-sm font-semibold">
+              Xe đã ghép
+              <span className="text-[var(--text-tertiary)] font-normal ml-1.5 tnum">
+                {trips.length}
+              </span>
+            </h2>
+          </div>
+          <TripsPanel trips={trips} loading={tripsQuery.isLoading} />
+        </section>
+      </div>
+
+      <SlideOver
+        open={formOpen}
+        title="Thêm khách mới"
+        description="Nhập thông tin và địa chỉ để đưa khách vào hàng chờ ghép."
+        onClose={() => setFormOpen(false)}
+      >
+        <BookingForm
+          onCreated={() => {
+            refreshAll();
+            setFormOpen(false);
+          }}
+        />
+      </SlideOver>
+    </AppShell>
+  );
+}
+
+function Stat({
+  label,
+  value,
+  tone,
+}: {
+  label: string;
+  value: string | number;
+  tone?: "warning" | "success";
+}) {
+  const color =
+    tone === "warning"
+      ? "text-[var(--warning)]"
+      : tone === "success"
+        ? "text-[var(--success)]"
+        : "text-[var(--text)]";
+  return (
+    <Card className="px-4 py-3">
+      <p className="text-[11px] text-[var(--text-tertiary)] mb-1">{label}</p>
+      <p className={`text-xl font-semibold tnum ${color}`}>{value}</p>
+    </Card>
   );
 }
