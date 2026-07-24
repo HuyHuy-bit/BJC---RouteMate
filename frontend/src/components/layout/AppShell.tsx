@@ -3,12 +3,7 @@ import { Link } from "react-router-dom";
 import { Car, History, LogOut, UserPlus } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import Button from "../ui/Button";
-
-const ROLE_LABEL: Record<string, string> = {
-  admin: "Quản trị",
-  dispatcher: "Điều phối",
-  driver: "Tài xế",
-};
+import { ROLE_LABEL } from "../../lib/format";
 
 /**
  * One shell for every authenticated screen. Previously each page
@@ -87,14 +82,14 @@ export default function AppShell({
               )}
 
               {user?.role === "admin" && (
-                <Link to="/admin/users/new" aria-label="Thêm nhân viên">
+                <Link to="/employees" aria-label="Nhân viên">
                   <Button
                     variant="ghost"
                     size="sm"
                     iconLeft={<UserPlus size={14} aria-hidden="true" />}
                     className="!px-2 sm:!px-2.5"
                   >
-                    <span className="hidden sm:inline">Thêm nhân viên</span>
+                    <span className="hidden sm:inline">Nhân viên</span>
                   </Button>
                 </Link>
               )}

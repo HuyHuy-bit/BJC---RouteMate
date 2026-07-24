@@ -30,6 +30,11 @@ class UserOut(BaseModel):
     model_config = {"from_attributes": True}
 
 
+class UserUpdate(BaseModel):
+    is_active: bool | None = None
+    role: UserRole | None = None
+
+
 class TokenPair(BaseModel):
     access_token: str
     refresh_token: str

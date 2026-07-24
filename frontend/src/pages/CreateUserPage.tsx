@@ -74,9 +74,9 @@ export default function CreateUserPage() {
       subtitle="Tạo tài khoản đăng nhập cho điều phối viên, tài xế hoặc quản trị viên."
       width="narrow"
       actions={
-        <Link to="/">
+        <Link to="/employees">
           <Button variant="ghost" iconLeft={<ArrowLeft size={15} aria-hidden="true" />}>
-            Về bảng điều phối
+            Danh sách nhân viên
           </Button>
         </Link>
       }

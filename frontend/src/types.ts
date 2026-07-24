@@ -31,6 +31,11 @@ export interface UserOut {
   is_active: boolean;
 }
 
+export interface UserUpdate {
+  is_active?: boolean;
+  role?: UserRole;
+}
+
 export interface TokenPair {
   access_token: string;
   refresh_token: string;

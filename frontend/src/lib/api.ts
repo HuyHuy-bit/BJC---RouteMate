@@ -13,6 +13,7 @@ import type {
   TripStatus,
   UserOut,
   UserRole,
+  UserUpdate,
   VehicleCreate,
   VehicleOut,
   VehicleUpdate,
@@ -37,6 +38,9 @@ export const api = {
       apiClient
         .get<UserOut[]>("/users", { params: role ? { role } : undefined })
         .then((r) => r.data),
+    update: (id: string, payload: UserUpdate) =>
+      apiClient.patch<UserOut>(`/users/${id}`, payload).then((r) => r.data),
+    delete: (id: string) => apiClient.delete(`/users/${id}`),
   },
   customers: {
     delete: (id: string) => apiClient.delete(`/customers/${id}`),

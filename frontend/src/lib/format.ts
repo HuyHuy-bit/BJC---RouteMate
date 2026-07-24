@@ -77,6 +77,12 @@ export const TRIP_STATUS: Record<TripStatus, { label: string; tone: Tone }> = {
   reassigning: { label: "Đang đổi xe", tone: "danger" },
 };
 
+export const ROLE_LABEL: Record<string, string> = {
+  admin: "Quản trị",
+  dispatcher: "Điều phối",
+  driver: "Tài xế",
+};
+
 export const DIRECTION: Record<BookingDirection, { label: string; short: string }> = {
   outbound: { label: "Bắc Giang → Hà Nội", short: "→ Hà Nội" },
   return: { label: "Hà Nội → Bắc Giang", short: "→ Bắc Giang" },
