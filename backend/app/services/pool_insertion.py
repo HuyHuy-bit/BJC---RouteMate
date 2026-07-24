@@ -71,6 +71,13 @@ class InsertionResult:
     total_distance_meters: float = 0.0
     worst_detour_minutes: float = 0.0
     is_estimate: bool = False
+    # Cumulative seconds from route start to each booking's pickup and
+    # dropoff, keyed booking_id -> {"pickup": x, "dropoff": y}. This is
+    # what makes real per-stop ETAs possible: the old _apply_etas split
+    # total route duration EVENLY across stops and gave every passenger
+    # the same dropoff time, which then fed find_returning_vehicle
+    # fabricated arrival numbers.
+    stop_offsets_seconds: dict[UUID, dict[str, float]] | None = None
 
 
 
@@ -159,6 +166,30 @@ def _best_ordering(
     return total, [stops[i] for i in order]
 
 
+def stop_schedule(
+    ordered_stops: list[Stop],
+    durations: dict[tuple[int, int], float],
+    index: dict[tuple[UUID, str], int],
+) -> dict[UUID, dict[str, float]]:
+    """
+    Walks an ordered stop list accumulating real leg durations, and
+    returns each booking's pickup/dropoff offset (seconds from route
+    start). The single source of truth for both the detour check and the
+    committed ETAs, so those two can never disagree.
+    """
+    offsets: dict[UUID, dict[str, float]] = {}
+    elapsed = 0.0
+    for i, stop in enumerate(ordered_stops):
+        if i > 0:
+            prev = ordered_stops[i - 1]
+            elapsed += durations[
+                (index[(prev.booking_id, prev.kind)],
+                 index[(stop.booking_id, stop.kind)])
+            ]
+        offsets.setdefault(stop.booking_id, {})[stop.kind] = elapsed
+    return offsets
+
+
 def _leg_lookup(coords: list[Coord]) -> dict[tuple[int, int], float]:
     """One batched matrix call covering every stop-to-stop pair."""
     matrix = routing_service.matrix(coords, coords)
@@ -217,24 +248,16 @@ def evaluate_insertion(
         return InsertionResult(False, "no valid stop ordering found")
 
     # ---- Stage 4: per-passenger service guarantee ------------------
-    # Walk the chosen route accumulating elapsed time, so each passenger's
-    # in-car duration can be compared to their own solo baseline.
-    elapsed = 0.0
-    boarded_at: dict[UUID, float] = {}
+    # Real per-stop offsets from the chosen route — each passenger's
+    # in-car time (dropoff offset minus pickup offset) is compared to
+    # their own solo baseline. The same offsets are returned below so the
+    # committed ETAs use these exact numbers, not an even split.
+    offsets = stop_schedule(best_order, durations, index)
     detours: dict[UUID, float] = {}
-
-    for i, stop in enumerate(best_order):
-        if i > 0:
-            prev = best_order[i - 1]
-            elapsed += durations[
-                (index[(prev.booking_id, prev.kind)], index[(stop.booking_id, stop.kind)])
-            ]
-        if stop.kind == "pickup":
-            boarded_at[stop.booking_id] = elapsed
-        else:
-            solo = next(m.solo_duration_seconds for m in everyone if m.booking_id == stop.booking_id)
-            in_car = elapsed - boarded_at[stop.booking_id]
-            detours[stop.booking_id] = (in_car - solo) / 60.0
+    for m in everyone:
+        off = offsets[m.booking_id]
+        in_car = off["dropoff"] - off["pickup"]
+        detours[m.booking_id] = (in_car - m.solo_duration_seconds) / 60.0
 
     worst_detour = max(detours.values()) if detours else 0.0
     if worst_detour > MAX_PASSENGER_DETOUR_MINUTES:
@@ -301,6 +324,7 @@ def evaluate_insertion(
         total_distance_meters=route.total_distance_meters,
         worst_detour_minutes=worst_detour,
         is_estimate=route.is_estimate,
+        stop_offsets_seconds=offsets,
     )
 
 

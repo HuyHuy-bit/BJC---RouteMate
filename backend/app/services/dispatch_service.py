@@ -43,6 +43,7 @@ from app.services.dispatch_engine import (
 )
 from app.services.pool_insertion import (
     PoolMember,
+    _as_utc,
     compute_solo_baseline,
     evaluate_insertion,
 )
@@ -132,14 +133,20 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
     trip.departure_deadline = earliest + timedelta(minutes=MAX_POOL_WAIT_MINUTES)
 
     members = [_to_member(b) for b in active]
+    offsets: dict | None = None
     if len(members) == 1:
         m = members[0]
         route = routing_service.route([m.pickup, m.dropoff])
+        active[0].stop_order = 1
+        offsets = {
+            m.booking_id: {"pickup": 0.0, "dropoff": route.total_duration_seconds}
+        }
     else:
         # Reuse the insertion evaluator's ordering for a consistent route.
         result = evaluate_insertion(members[:-1], members[-1])
         if result.feasible and result.ordered_stops:
             route = routing_service.route([s.coord for s in result.ordered_stops])
+            offsets = result.stop_offsets_seconds
             for rank, stop in enumerate(
                 [s for s in result.ordered_stops if s.kind == "pickup"], start=1
             ):
@@ -155,6 +162,8 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
     trip.route_duration_seconds = route.total_duration_seconds
     trip.route_geometry = route.geometry
     trip.route_is_estimate = route.is_estimate
+
+    _write_etas(active, offsets, route.total_duration_seconds)
 
 
 def find_pool_for_booking(db: Session, booking: Booking) -> Trip | None:
@@ -305,8 +314,12 @@ def find_returning_vehicle(db: Session, booking: Booking) -> Vehicle | None:
             continue  # ETAs not yet computed for this trip; skip rather than guess
 
         estimated_arrival = max(arrivals)
+        # Both sides normalized to aware-UTC before subtracting —
+        # estimated_dropoff_at and requested_pickup_at can come back from
+        # Postgres with differing tzinfo, and mixing naive/aware raises
+        # TypeError mid-cycle.
         gap_minutes = (
-            booking.requested_pickup_at - estimated_arrival
+            _as_utc(booking.requested_pickup_at) - _as_utc(estimated_arrival)
         ).total_seconds() / 60
 
         too_late = gap_minutes < -RETURN_VEHICLE_LATE_TOLERANCE_MINUTES
@@ -480,28 +493,35 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
     return vehicle
 
 
-def _apply_etas(trip: Trip) -> None:
+def _write_etas(
+    active: list[Booking],
+    offsets: dict | None,
+    total_duration_seconds: float,
+) -> None:
     """
-    Writes firm pickup/dropoff estimates once a pool seals, so customers
-    get a real time instead of silence.
+    Writes firm pickup/dropoff estimates from the route's REAL per-stop
+    offsets (see pool_insertion.stop_schedule), anchored to the earliest
+    requested pickup. Replaces an even-split that gave every passenger
+    the same fabricated dropoff time — numbers find_returning_vehicle
+    then matched return bookings against.
     """
-    active = sorted(
-        [
-            b
-            for b in trip.bookings
-            if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
-        ],
-        key=lambda b: (b.stop_order or 0),
-    )
     if not active:
         return
     start = min(b.requested_pickup_at for b in active)
-    per_stop = (trip.route_duration_seconds or 0) / max(1, len(active) * 2)
-    for i, b in enumerate(active):
-        b.estimated_pickup_at = start + timedelta(seconds=per_stop * i)
-        b.estimated_dropoff_at = start + timedelta(
-            seconds=(trip.route_duration_seconds or 0)
-        )
+    for b in active:
+        off = offsets.get(b.id) if offsets else None
+        if off is not None:
+            b.estimated_pickup_at = start + timedelta(seconds=off.get("pickup", 0.0))
+            b.estimated_dropoff_at = start + timedelta(
+                seconds=off.get("dropoff", total_duration_seconds or 0.0)
+            )
+        else:
+            # Degraded fallback (no feasible ordering / no offsets): a
+            # coarse but honest estimate rather than a wrong-precise one.
+            b.estimated_pickup_at = start
+            b.estimated_dropoff_at = start + timedelta(
+                seconds=total_duration_seconds or 0.0
+            )
 
 
 def release_vehicle_if_free(db: Session, trip: Trip) -> None:
@@ -581,9 +601,10 @@ def detach_booking_from_trip(
         )
         return
 
+    # _refresh_pool_geometry now writes real per-stop ETAs itself, so
+    # the remaining passengers' pickup/dropoff estimates are already
+    # up to date after a booking leaves — no separate ETA pass needed.
     _refresh_pool_geometry(db, old_trip)
-    if old_trip.status in (TripStatus.assigned, TripStatus.in_progress):
-        _apply_etas(old_trip)
 
     log_event(
         db,
@@ -617,8 +638,8 @@ def seal_trip(
 
     trip.status = TripStatus.assigned
     trip.sealed_at = now
+    # Refreshes geometry AND writes real per-stop ETAs in one pass.
     _refresh_pool_geometry(db, trip)
-    _apply_etas(trip)
     for b in trip.bookings:
         if b.status == BookingStatus.matched:
             b.status = BookingStatus.locked
