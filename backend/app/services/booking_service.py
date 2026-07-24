@@ -40,11 +40,11 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
             "pickup/dropoff do not sit on any active corridor"
         )
 
-    # Real point-to-point distance/duration, computed once up front so
-    # the price quoted at booking time is the final price — it used to
-    # be flat regardless of distance, and computing it later (during
-    # matching) would mean a price that could silently change after the
-    # customer already committed.
+    # Real point-to-point distance/duration, computed once up front.
+    # Not used for pricing (that's a flat per-corridor rate — see
+    # app/core/pricing.py) but stored as this booking's solo baseline,
+    # which is what makes the per-passenger detour guarantee enforceable
+    # during matching (see pool_insertion.py).
     leg = routing_service.leg(
         (payload.pickup_lat, payload.pickup_lng),
         (payload.dropoff_lat, payload.dropoff_lng),
@@ -61,7 +61,7 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         corridor_id=corridor.id,
         solo_duration_seconds=leg.duration_seconds,
         solo_distance_meters=leg.distance_meters,
-        price_vnd=price_for(corridor, payload.is_private, leg.distance_meters),
+        price_vnd=price_for(corridor, payload.is_private),
         # Inferred automatically, not customer-supplied — see
         # app/services/geo.py:classify_direction. Direction is decided by
         # which way the passenger moves ALONG the corridor (comparing

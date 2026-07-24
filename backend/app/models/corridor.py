@@ -41,8 +41,11 @@ class Corridor(Base, TimestampMixin):
 
     is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 
-    # Pricing rate for this corridor specifically — a flat national price
-    # made no sense once corridors can have different lengths. See
-    # app/core/pricing.py:price_for.
+    # Flat fare for this corridor, regardless of exactly where within it
+    # a passenger boards/alights — deliberately NOT distance-scaled. An
+    # earlier version of this made price grow with distance, which is
+    # more "correct" on paper but broke the thing that actually made
+    # this business work: a customer can quote the price from memory
+    # before they even open the app, with zero ambiguity, every time.
+    # See app/core/pricing.py:price_for.
     base_fare_vnd: Mapped[int] = mapped_column(Integer)
-    per_km_vnd: Mapped[int] = mapped_column(Integer)

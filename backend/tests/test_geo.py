@@ -23,8 +23,7 @@ CORRIDOR = Corridor(
     away_hub_name="Hà Nội",
     away_hub_lat=HA_NOI[0],
     away_hub_lng=HA_NOI[1],
-    base_fare_vnd=50_000,
-    per_km_vnd=2_000,
+    base_fare_vnd=150_000,
 )
 
 

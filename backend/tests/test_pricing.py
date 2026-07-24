@@ -1,13 +1,11 @@
 """
 Pure-function coverage for fare calculation — no database needed.
+
+Pricing is deliberately flat per corridor (see app/core/pricing.py for
+why) — there is no distance input at all, on purpose.
 """
 
-from app.core.pricing import (
-    CASH_ROUNDING_VND,
-    MIN_FARE_VND,
-    PRIVATE_MULTIPLIER,
-    price_for,
-)
+from app.core.pricing import PRIVATE_MULTIPLIER, price_for
 from app.models.corridor import Corridor
 
 CORRIDOR = Corridor(
@@ -18,50 +16,38 @@ CORRIDOR = Corridor(
     away_hub_name="Hà Nội",
     away_hub_lat=21.0285,
     away_hub_lng=105.8542,
-    base_fare_vnd=50_000,
-    per_km_vnd=2_000,
+    base_fare_vnd=150_000,
 )
 
 
-def test_full_corridor_distance_matches_legacy_flat_price():
-    # 50km was chosen when seeding this corridor specifically so the
-    # full-length fare lands on the flat price this replaced.
-    price = price_for(CORRIDOR, is_private=False, distance_meters=50_000)
-    assert price == 150_000
+def test_shared_price_is_the_corridor_flat_rate():
+    assert price_for(CORRIDOR, is_private=False) == 150_000
 
 
-def test_short_hop_costs_less_than_full_corridor():
-    short = price_for(CORRIDOR, is_private=False, distance_meters=5_000)
-    full = price_for(CORRIDOR, is_private=False, distance_meters=50_000)
-    assert short < full
+def test_price_does_not_vary_by_anything_except_privacy():
+    # Same corridor, called repeatedly — must always return the same
+    # number. There is nothing else for it to depend on.
+    prices = {price_for(CORRIDOR, is_private=False) for _ in range(5)}
+    assert prices == {150_000}
 
 
-def test_floor_applies_when_corridor_rate_would_undercut_it():
-    # A corridor whose base fare alone sits below the floor — the floor
-    # exists precisely to guard against a low/misconfigured rate like
-    # this, not something the seeded production corridor ever triggers.
-    cheap_corridor = Corridor(
-        name="test-cheap",
+def test_private_is_multiplier_times_shared():
+    shared = price_for(CORRIDOR, is_private=False)
+    private = price_for(CORRIDOR, is_private=True)
+    assert private == shared * PRIVATE_MULTIPLIER
+    assert private == 600_000
+
+
+def test_different_corridors_can_have_different_flat_rates():
+    other = Corridor(
+        name="test-other-corridor",
         home_hub_name="A",
         home_hub_lat=0,
         home_hub_lng=0,
         away_hub_name="B",
         away_hub_lat=0,
         away_hub_lng=0,
-        base_fare_vnd=5_000,
-        per_km_vnd=100,
+        base_fare_vnd=200_000,
     )
-    price = price_for(cheap_corridor, is_private=False, distance_meters=0)
-    assert price == MIN_FARE_VND
-
-
-def test_price_is_rounded_to_cash_denomination():
-    # An odd distance that would otherwise produce a non-round number.
-    price = price_for(CORRIDOR, is_private=False, distance_meters=17_345)
-    assert price % CASH_ROUNDING_VND == 0
-
-
-def test_private_is_multiplier_times_shared():
-    shared = price_for(CORRIDOR, is_private=False, distance_meters=30_000)
-    private = price_for(CORRIDOR, is_private=True, distance_meters=30_000)
-    assert private == shared * PRIVATE_MULTIPLIER
+    assert price_for(CORRIDOR, is_private=False) == 150_000
+    assert price_for(other, is_private=False) == 200_000
