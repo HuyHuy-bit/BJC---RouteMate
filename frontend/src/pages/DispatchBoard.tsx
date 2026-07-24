@@ -50,15 +50,25 @@ export default function DispatchBoard() {
     queryClient.invalidateQueries({ queryKey: ["trips"] });
   };
 
-  const bookings = bookingsQuery.data ?? [];
+  // The queue is for bookings still relevant to dispatch. Once a
+  // booking is completed or cancelled it's history, not queue — GET
+  // /bookings returns every booking ever made with no status filter,
+  // so this list would otherwise fill up with finished rides forever.
+  // HistoryPage is the real place to look those up.
+  const bookings = useMemo(
+    () =>
+      (bookingsQuery.data ?? []).filter(
+        (b) => b.status !== "completed" && b.status !== "cancelled"
+      ),
+    [bookingsQuery.data]
+  );
   const trips = tripsQuery.data ?? [];
 
   const stats = useMemo(() => {
-    const active = bookings.filter((b) => b.status !== "cancelled");
     return {
-      waiting: active.filter((b) => b.status === "queued" || b.status === "waiting")
+      waiting: bookings.filter((b) => b.status === "queued" || b.status === "waiting")
         .length,
-      matched: active.filter((b) => b.status === "matched").length,
+      matched: bookings.filter((b) => b.status === "matched").length,
       cars: trips.length,
       revenue: trips.reduce(
         (sum, t) => sum + t.bookings.reduce((s, b) => s + b.price_vnd, 0),
