@@ -46,6 +46,7 @@ from app.services.pool_insertion import (
     compute_solo_baseline,
     evaluate_insertion,
 )
+from app.services.reclustering import cluster_by_proximity, time_cluster
 from app.services.routing import routing_service
 from app.services.notification_service import notify_trip_disrupted, notify_trip_sealed
 
@@ -661,6 +662,205 @@ def merge_trips(
     )
 
 
+def recluster_forming_pools(db: Session, now: datetime) -> int:
+    """
+    Periodically re-groups still-forming pools by pickup time first,
+    geographic proximity second (see reclustering.py for the actual
+    grouping logic and why). Continuous matching (assign_booking) still
+    places a booking the instant it's created — this corrects that
+    greedy, order-dependent placement shortly after, every dispatch
+    tick, rather than replacing it.
+
+    Only ever touches trips still `status == forming`. A trip that's
+    sealed/assigned/in_progress is never read or written here — once a
+    customer has a firm car and ETA, reclustering cannot change it.
+
+    Returns how many (corridor, direction) groups actually changed.
+    """
+    trips = (
+        db.execute(select(Trip).where(Trip.status == TripStatus.forming))
+        .scalars()
+        .all()
+    )
+
+    # Private hires are solo by definition and never subject to
+    # grouping — excluded entirely, not just their bookings, so a
+    # private trip can never accidentally get claimed as the "target"
+    # for someone else's group during reconciliation below.
+    groups: dict[tuple, list[Trip]] = {}
+    for trip in trips:
+        active = [
+            b
+            for b in trip.bookings
+            if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+        ]
+        if any(b.is_private for b in active):
+            continue
+        groups.setdefault((trip.corridor_id, trip.direction), []).append(trip)
+
+    changed_groups = 0
+
+    for (corridor_id, direction), group_trips in groups.items():
+        active_by_trip: dict[UUID, list[Booking]] = {}
+        all_bookings: list[Booking] = []
+        for trip in group_trips:
+            active = [
+                b
+                for b in trip.bookings
+                if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+            ]
+            active_by_trip[trip.id] = active
+            all_bookings.extend(active)
+
+        if not all_bookings:
+            continue
+
+        if any(b.solo_duration_seconds is None or b.solo_duration_seconds <= 0 for b in all_bookings):
+            continue  # baseline missing for someone; skip rather than compute garbage
+
+        booking_by_id = {b.id: b for b in all_bookings}
+        members = [_to_member(b) for b in all_bookings]
+
+        # Cheap, pure pre-check: if this is a single trip whose members
+        # already form one time-cluster (nothing a time-first regroup
+        # would split apart) and it isn't over capacity, there's
+        # nothing to gain from the expensive proximity pass below. This
+        # must check time cohesion, not just capacity — a single
+        # under-capacity trip can still span multiple time waves (e.g.
+        # someone requested at 4:00, someone else at 4:35) that time-
+        # first grouping should still split apart even though all of
+        # them would happily fit in one car.
+        time_clusters = time_cluster(members)
+        if (
+            len(group_trips) == 1
+            and len(time_clusters) == 1
+            and len(all_bookings) <= MAX_PASSENGERS
+        ):
+            continue
+
+        new_groups = [
+            {m.booking_id for m in g}
+            for cluster in time_clusters
+            for g in cluster_by_proximity(cluster)
+        ]
+
+        current_groups = {
+            trip.id: {b.id for b in active_by_trip[trip.id]} for trip in group_trips
+        }
+        if {frozenset(s) for s in current_groups.values()} == {
+            frozenset(s) for s in new_groups
+        }:
+            continue  # identical grouping — nothing to apply
+
+        # Match each new group to whichever existing trip it overlaps
+        # with most, preferring one that already has a vehicle reserved
+        # — so a return-leg trip's find_returning_vehicle reservation
+        # (or an already-assigned vehicle) survives a regroup instead of
+        # being silently dropped when membership barely changes.
+        available_trips = list(group_trips)
+        assignments: list[tuple[set, Trip | None]] = []
+        for new_group_ids in new_groups:
+            best_trip: Trip | None = None
+            best_key = (-1, 0)
+            for trip in available_trips:
+                overlap = len(current_groups[trip.id] & new_group_ids)
+                key = (overlap, 1 if trip.vehicle_id else 0)
+                if key > best_key:
+                    best_trip, best_key = trip, key
+            assignments.append((new_group_ids, best_trip))
+            if best_trip is not None:
+                available_trips.remove(best_trip)
+
+        # Every trip touched this pass — the pre-existing ones plus any
+        # freshly created below — needs its geometry refreshed at the
+        # end. Tracking newly-created trips separately from group_trips
+        # (which only ever holds trips that existed at the start of this
+        # function) is what makes that possible.
+        touched_trips = list(group_trips)
+
+        moves: list[tuple[Booking, Trip]] = []
+        for new_group_ids, target_trip in assignments:
+            if target_trip is None:
+                earliest_pickup = min(
+                    booking_by_id[bid].requested_pickup_at for bid in new_group_ids
+                )
+                target_trip = Trip(
+                    direction=direction,
+                    corridor_id=corridor_id,
+                    status=TripStatus.forming,
+                    departure_deadline=earliest_pickup
+                    + timedelta(minutes=MAX_POOL_WAIT_MINUTES),
+                )
+                db.add(target_trip)
+                db.flush()
+                touched_trips.append(target_trip)
+
+            for booking_id in new_group_ids:
+                booking = booking_by_id[booking_id]
+                if booking.trip_id != target_trip.id:
+                    moves.append((booking, target_trip))
+
+        any_booking_moved = bool(moves)
+
+        # Two-phase move: detach everyone that's changing trips first,
+        # flush, THEN attach to their real target and flush again.
+        # Moving straight to the new trip in one pass can transiently
+        # overfill a trip's 4-seat capacity mid-flush — e.g. group X
+        # gains a booking that's still, for one more UPDATE statement,
+        # also claimed by group Y — and the database enforces capacity
+        # with a row-level trigger (enforce_trip_capacity) that rejects
+        # that transient state outright, even though the FINAL state
+        # would be perfectly legal. Detaching everyone first guarantees
+        # no trip is ever seen over capacity by that trigger.
+        #
+        # Assigning through the relationship (booking.trip = ...), not
+        # the raw trip_id column, is also required, not stylistic — it
+        # keeps the OLD trip's in-memory `.bookings` collection
+        # consistent immediately via back_populates. A raw trip_id
+        # write leaves that collection stale in the session for the
+        # rest of this request, which previously caused a trip we'd
+        # just shrunk from 4 bookings to 2 to still evaluate as "full
+        # (4 passengers)" a few lines later and seal wrongly.
+        for booking, _ in moves:
+            booking.trip = None
+        db.flush()
+        for booking, target_trip in moves:
+            booking.trip = target_trip
+        db.flush()
+
+        # Dissolve any trip a regroup emptied out entirely. Only
+        # pre-existing trips can end up empty here — anything just
+        # created only ever gains bookings in this same pass.
+        for trip in group_trips:
+            remaining = (
+                db.query(Booking)
+                .filter(Booking.trip_id == trip.id)
+                .filter(Booking.status.notin_([BookingStatus.cancelled, BookingStatus.no_show]))
+                .count()
+            )
+            if remaining == 0:
+                trip.status = TripStatus.cancelled
+
+        for trip in touched_trips:
+            if trip.status == TripStatus.forming:
+                _refresh_pool_geometry(db, trip)
+
+        if any_booking_moved:
+            changed_groups += 1
+            log_event(
+                db,
+                DispatchEventType.pool_reclustered,
+                reason="regrouped by pickup-time then proximity",
+                details={
+                    "corridor_id": str(corridor_id),
+                    "direction": direction.value,
+                    "groups": len(new_groups),
+                },
+            )
+
+    return changed_groups
+
+
 DISRUPTION_MEANS_BREAKDOWN = {"breakdown", "accident"}
 
 
@@ -765,6 +965,11 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
 
     newly_matched = sweep_unmatched_bookings(db)
 
+    # Time-first, distance-second regroup of everything still forming —
+    # corrects continuous matching's greedy, order-dependent placement
+    # before this same tick decides what to seal. See reclustering.py.
+    reclustered = recluster_forming_pools(db, now)
+
     # A trip a driver reported disrupted (report_trip_disrupted) that
     # couldn't find a replacement vehicle immediately stays `reassigning`
     # with no vehicle — retry it every tick, exactly like an under-
@@ -842,6 +1047,7 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
     db.commit()
     summary = {
         "newly_matched": newly_matched,
+        "reclustered": reclustered,
         "pools_examined": len(trips),
         "sealed": sealed,
         "escalated": escalated,
@@ -849,6 +1055,6 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
         "blocked_no_vehicle": no_vehicle,
         "reassigned": reassigned,
     }
-    if newly_matched or sealed or escalated or merged or no_vehicle or reassigned:
+    if newly_matched or reclustered or sealed or escalated or merged or no_vehicle or reassigned:
         logger.info("dispatch cycle: %s", summary)
     return summary

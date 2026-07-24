@@ -57,6 +57,21 @@ def create_vehicle(
         if len(active_corridors) == 1:
             data["home_corridor_id"] = active_corridors[0].id
     vehicle = Vehicle(**data)
+
+    # A brand-new vehicle has never completed a trip, so it has no
+    # recorded last_location — without this, _assign_vehicle's proximity
+    # ordering would treat it as "location unknown, assume far away" and
+    # deprioritize it, which is backwards: it's sitting at the depot.
+    # Seed it to the home corridor's base hub so it's correctly treated
+    # as "at base" from day one.
+    if vehicle.home_corridor_id is not None:
+        home_corridor = db.get(Corridor, vehicle.home_corridor_id)
+        if home_corridor is not None:
+            vehicle.last_location = WKTElement(
+                f"POINT({home_corridor.home_hub_lng} {home_corridor.home_hub_lat})",
+                srid=4326,
+            )
+
     db.add(vehicle)
     db.commit()
     db.refresh(vehicle)

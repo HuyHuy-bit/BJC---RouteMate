@@ -75,3 +75,4 @@ class DispatchEventType(str, enum.Enum):
     trip_cancelled = "trip_cancelled"
     driver_rejected = "driver_rejected"
     manual_override = "manual_override"
+    pool_reclustered = "pool_reclustered"

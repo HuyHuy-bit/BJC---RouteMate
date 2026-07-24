@@ -14,8 +14,17 @@ MAX_PASSENGERS = 4
 # Two bookings can only share a car if their requested pickup times fall
 # within this window of each other. Replaces the old "same calendar date"
 # bucketing, which wrongly matched 06:00 with 22:00 and wrongly refused
-# to match 23:50 with 00:10.
+# to match 23:50 with 00:10. This is the absolute ceiling — never
+# exceeded regardless of anything else.
 PICKUP_WINDOW_MINUTES = 45
+
+# How close pickup times need to be to count as "the same wave" of
+# demand for the periodic re-clustering pass (see reclustering.py) —
+# deliberately tighter than PICKUP_WINDOW_MINUTES. Time is the PRIMARY
+# grouping signal now: passengers leaving around the same time get
+# grouped together first, and only get split across multiple cars by
+# geographic proximity once one wave has more demand than a single car.
+TIME_CLUSTER_MINUTES = 20
 
 # How long a forming pool waits for more passengers before it must decide
 # to depart or escalate.
