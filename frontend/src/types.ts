@@ -110,6 +110,7 @@ export interface TripOut {
   id: string;
   status: TripStatus;
   driver_id: string | null;
+  vehicle_id: string | null;
   vehicle_label: string | null;
   is_private: boolean;
   bookings: BookingOut[];
@@ -143,6 +144,12 @@ export interface VehicleOut {
   status: VehicleStatus;
   default_driver_id: string | null;
   home_corridor_id: string | null;
+  last_location_at: string | null;
+}
+
+export interface VehicleLocationPing {
+  lat: number;
+  lng: number;
 }
 
 export interface VehicleCreate {

@@ -18,6 +18,7 @@ import type {
   UserRole,
   UserUpdate,
   VehicleCreate,
+  VehicleLocationPing,
   VehicleOut,
   VehicleUpdate,
 } from "../types";
@@ -55,6 +56,10 @@ export const api = {
     update: (id: string, payload: VehicleUpdate) =>
       apiClient.patch<VehicleOut>(`/vehicles/${id}`, payload).then((r) => r.data),
     delete: (id: string) => apiClient.delete(`/vehicles/${id}`),
+    reportLocation: (id: string, payload: VehicleLocationPing) =>
+      apiClient
+        .post<VehicleOut>(`/vehicles/${id}/location`, payload)
+        .then((r) => r.data),
   },
   bookings: {
     list: (statusFilter?: BookingStatus) =>

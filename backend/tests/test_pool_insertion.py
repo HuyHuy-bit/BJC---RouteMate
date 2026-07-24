@@ -137,3 +137,33 @@ def test_optimum_late_in_lexicographic_order_is_still_found():
     ref_total, _ = _reference_best(kinds, owners, cost)
     assert abs(total - ref_total) < 1e-9
     assert order == cheap_chain
+
+
+def test_start_cost_anchors_the_route_and_is_included_in_total():
+    # Phase 4: a fixed starting point (a vehicle's position) should
+    # change which stop gets visited first, and the leg from that start
+    # to the first real stop should count toward the total — deadhead
+    # distance becomes part of what's minimized, not invisible to it.
+    A, B = uuid4(), uuid4()
+    kinds = ["pickup", "dropoff", "pickup", "dropoff"]
+    owners = [A, A, B, B]
+    # 0=pA, 1=dA, 2=pB, 3=dB — a uniform-cost chain, so without an
+    # anchor the search is free to start wherever, and any minimal
+    # route costs exactly 3 legs.
+    legs = {(i, j): 1.0 for i in range(4) for j in range(4)}
+    cost = lambda i, j: legs[(i, j)]  # noqa: E731
+
+    total_free, _order_free, _ = solve_pdp(kinds, owners, cost)
+    assert total_free == 3.0
+
+    # Anchor makes starting at B's pickup (index 2) nearly free and
+    # starting at A's pickup (index 0) hugely expensive.
+    def start_cost(i):
+        return 0.0 if i == 2 else 1000.0
+
+    total_anchored, order_anchored, arrivals = solve_pdp(
+        kinds, owners, cost, start_cost=start_cost
+    )
+    assert order_anchored[0] == 2  # starts at pB, not pA
+    assert arrivals[0] == 0.0  # the (cheap) start leg is baked into the schedule
+    assert total_anchored < 1000.0  # never seriously considers starting at pA

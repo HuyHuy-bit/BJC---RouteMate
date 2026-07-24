@@ -13,7 +13,7 @@ from uuid import UUID
 
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.shape import to_shape
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.orm import Session
 
 from app.core.dispatch_config import (
@@ -22,6 +22,7 @@ from app.core.dispatch_config import (
     PICKUP_WINDOW_MINUTES,
     RETURN_VEHICLE_LATE_TOLERANCE_MINUTES,
     RETURN_VEHICLE_MATCH_WINDOW_MINUTES,
+    VEHICLE_LOCATION_STALE_MINUTES,
 )
 from app.models.booking import Booking
 from app.models.dispatch_event import DispatchEvent
@@ -44,6 +45,7 @@ from app.services.dispatch_engine import (
 from app.services.pool_insertion import (
     PoolMember,
     _as_utc,
+    best_ordering_from_position,
     compute_solo_baseline,
     evaluate_insertion,
 )
@@ -134,6 +136,29 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
 
     members = [_to_member(b) for b in active]
     offsets: dict | None = None
+
+    # If a vehicle is already committed to this trip (most notably right
+    # after seal_trip's _assign_vehicle call) and we have a fresh fix on
+    # where it actually is, anchor the route there instead of letting
+    # the search start wherever happens to be cheapest. This is what
+    # makes deadhead distance and real approach direction part of the
+    # committed order rather than invisible to it — see
+    # pool_insertion.best_ordering_from_position.
+    vehicle_position = None
+    if trip.vehicle_id is not None:
+        vehicle = db.get(Vehicle, trip.vehicle_id)
+        if (
+            vehicle is not None
+            and vehicle.last_location is not None
+            and vehicle.last_location_at is not None
+        ):
+            stale_cutoff = datetime.now(timezone.utc) - timedelta(
+                minutes=VEHICLE_LOCATION_STALE_MINUTES
+            )
+            if _as_utc(vehicle.last_location_at) >= stale_cutoff:
+                pos = to_shape(vehicle.last_location)
+                vehicle_position = (pos.y, pos.x)
+
     if len(members) == 1:
         m = members[0]
         route = routing_service.route([m.pickup, m.dropoff])
@@ -141,6 +166,25 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
         offsets = {
             m.booking_id: {"pickup": 0.0, "dropoff": route.total_duration_seconds}
         }
+    elif vehicle_position is not None:
+        _total, ordered_stops, position_offsets = best_ordering_from_position(
+            members, vehicle_position
+        )
+        if ordered_stops:
+            route = routing_service.route(
+                [vehicle_position] + [s.coord for s in ordered_stops]
+            )
+            offsets = position_offsets
+            for rank, stop in enumerate(
+                [s for s in ordered_stops if s.kind == "pickup"], start=1
+            ):
+                for b in active:
+                    if b.id == stop.booking_id:
+                        b.stop_order = rank
+        else:
+            route = routing_service.route(
+                [c for m in members for c in (m.pickup, m.dropoff)]
+            )
     else:
         # Reuse the insertion evaluator's ordering for a consistent route.
         result = evaluate_insertion(members[:-1], members[-1])
@@ -462,13 +506,23 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
     # end of the corridor could get sent to a pickup at the other end
     # while a closer car sat idle. Order by real distance to where this
     # trip actually needs a car (its centroid, already maintained by
-    # _refresh_pool_geometry); a vehicle with no known location sorts
-    # last rather than being excluded outright — never block a trip's
-    # departure over a location-tracking gap.
+    # _refresh_pool_geometry); a vehicle with no known OR STALE location
+    # sorts last rather than being excluded outright — never block a
+    # trip's departure over a location-tracking gap. A ping older than
+    # VEHICLE_LOCATION_STALE_MINUTES is treated identically to no ping at
+    # all: a phone that stopped reporting an hour ago is not still
+    # telling the truth about where the car is.
     base_query = select(Vehicle).where(Vehicle.status == VehicleStatus.available)
     if trip.centroid is not None:
-        order_expr = func.coalesce(
-            func.ST_Distance(Vehicle.last_location, trip.centroid), 1_000_000_000
+        stale_cutoff = datetime.now(timezone.utc) - timedelta(
+            minutes=VEHICLE_LOCATION_STALE_MINUTES
+        )
+        order_expr = case(
+            (Vehicle.last_location_at.is_(None), 1_000_000_000),
+            (Vehicle.last_location_at < stale_cutoff, 1_000_000_000),
+            else_=func.coalesce(
+                func.ST_Distance(Vehicle.last_location, trip.centroid), 1_000_000_000
+            ),
         )
         base_query = base_query.order_by(order_expr)
 

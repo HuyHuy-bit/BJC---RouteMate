@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from pydantic import BaseModel, Field
 
@@ -40,5 +41,14 @@ class VehicleOut(BaseModel):
     status: VehicleStatus
     default_driver_id: uuid.UUID | None
     home_corridor_id: uuid.UUID | None
+    last_location_at: datetime | None
 
     model_config = {"from_attributes": True}
+
+
+class VehicleLocationPing(BaseModel):
+    """Body for POST /vehicles/{id}/location — a driver reporting where
+    their currently-assigned vehicle is right now."""
+
+    lat: float = Field(ge=-90, le=90)
+    lng: float = Field(ge=-180, le=180)

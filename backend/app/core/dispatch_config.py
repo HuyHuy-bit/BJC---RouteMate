@@ -10,6 +10,13 @@ profile can override them wholesale later.
 # single source of truth for capacity across matching and dispatch.
 MAX_PASSENGERS = 4
 
+# --- Vehicle position ---
+# A Vehicle.last_location_at older than this is treated the same as "no
+# location at all" (sorted last, never excluded) when picking the
+# nearest vehicle for a trip — a driver's phone that stopped pinging an
+# hour ago is not still telling the truth about where the car is.
+VEHICLE_LOCATION_STALE_MINUTES = 10
+
 # --- Time windows ---
 # Two bookings can only share a car if their requested pickup times fall
 # within this window of each other. Replaces the old "same calendar date"

@@ -211,6 +211,53 @@ def _best_ordering(
     return total, ordered_stops, offsets
 
 
+def best_ordering_from_position(
+    members: list[PoolMember], vehicle_position: Coord
+) -> tuple[float, list[Stop], dict[UUID, dict[str, float]]]:
+    """
+    Same exact search as _best_ordering, but the route is anchored to
+    start from `vehicle_position` (a vehicle's current, non-stale
+    last_location) instead of being free to start at whichever stop is
+    cheapest. The vehicle -> first-pickup leg becomes part of what's
+    minimized, so deadhead distance actually shapes the chosen stop
+    order and approach direction instead of being invisible to it.
+
+    No schedule-window pruning here — this re-solves stop ORDER for an
+    already-accepted group of members once a specific vehicle is
+    committed, not new-member feasibility (already decided by
+    evaluate_insertion when each member joined). Returns the same
+    `(total_duration_seconds, ordered_stops, stop_offsets)` shape as
+    _best_ordering.
+    """
+    stops = _stops_of(members)
+    if not stops:
+        return 0.0, [], {}
+
+    coords = [vehicle_position] + [s.coord for s in stops]
+    matrix = routing_service.matrix(coords, coords)
+    durations = {
+        (i, j): matrix[i][j].duration_seconds
+        for i in range(len(coords))
+        for j in range(len(coords))
+    }
+    # Stop i lives at matrix slot i+1 — slot 0 is the vehicle's position.
+    kinds = [s.kind for s in stops]
+    owners = [s.booking_id for s in stops]
+
+    def cost(i: int, j: int) -> float:
+        return durations[(i + 1, j + 1)]
+
+    def start_cost(i: int) -> float:
+        return durations[(0, i + 1)]
+
+    total, order, arrivals = solve_pdp(kinds, owners, cost, start_cost=start_cost)
+    ordered_stops = [stops[i] for i in order]
+    offsets: dict[UUID, dict[str, float]] = {}
+    for stop, arrival in zip(ordered_stops, arrivals):
+        offsets.setdefault(stop.booking_id, {})[stop.kind] = arrival
+    return total, ordered_stops, offsets
+
+
 def _leg_lookup(coords: list[Coord]) -> dict[tuple[int, int], float]:
     """One batched matrix call covering every stop-to-stop pair."""
     matrix = routing_service.matrix(coords, coords)

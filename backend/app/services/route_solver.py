@@ -43,6 +43,7 @@ def solve_pdp(
     owners: list,
     cost: Callable[[int, int], float],
     feasible: Callable[[int, float], tuple[bool, float]] | None = None,
+    start_cost: Callable[[int], float] | None = None,
 ) -> tuple[float, list[int], list[float]]:
     """
     Minimum-cost pickup-and-delivery ordering over `len(kinds)` stops, by
@@ -63,6 +64,14 @@ def solve_pdp(
     into every later stop's arrival time, exactly like a real delay
     would. Passing `feasible=None` recovers the original unconstrained
     search.
+
+    `start_cost(stop_index)`, if given, is the cost of visiting that stop
+    AS THE FIRST STOP — e.g. the leg from a vehicle's current position to
+    that pickup. Without it, the first stop in any sequence costs 0 to
+    "arrive" at (the search is free to start anywhere); with it, that
+    deadhead leg becomes part of what the search minimizes, not invisible
+    to it, and whichever stop actually gets visited first pays a real
+    cost to reach.
 
     Returns `(best_total_cost, ordered_stop_indices, arrival_at_each)` —
     the third list is the actual schedule (cumulative cost, including any
@@ -101,7 +110,10 @@ def solve_pdp(
                 continue
             if kinds[i] == "dropoff" and owners[i] not in picked:
                 continue  # can't drop off before that rider's pickup
-            step = 0.0 if not seq else cost(seq[-1], i)
+            if not seq:
+                step = start_cost(i) if start_cost is not None else 0.0
+            else:
+                step = cost(seq[-1], i)
             arrival = running + step
             wait = 0.0
             if feasible is not None:

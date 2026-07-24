@@ -1,17 +1,23 @@
 import uuid
+from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from geoalchemy2.elements import WKTElement
 from sqlalchemy.orm import Session
 
-from app.api.deps import require_role
+from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.corridor import Corridor
 from app.models.enums import TripStatus, UserRole
 from app.models.trip import Trip
 from app.models.user import User
 from app.models.vehicle import Vehicle
-from app.schemas.vehicle import VehicleCreate, VehicleOut, VehicleUpdate
+from app.schemas.vehicle import (
+    VehicleCreate,
+    VehicleLocationPing,
+    VehicleOut,
+    VehicleUpdate,
+)
 
 router = APIRouter(tags=["vehicles"])
 
@@ -71,6 +77,7 @@ def create_vehicle(
                 f"POINT({home_corridor.home_hub_lng} {home_corridor.home_hub_lat})",
                 srid=4326,
             )
+            vehicle.last_location_at = datetime.now(timezone.utc)
 
     db.add(vehicle)
     db.commit()
@@ -97,6 +104,50 @@ def update_vehicle(
         setattr(vehicle, field, value)
     if lat is not None and lng is not None:
         vehicle.last_location = WKTElement(f"POINT({lng} {lat})", srid=4326)
+        vehicle.last_location_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(vehicle)
+    return vehicle
+
+
+@router.post("/{vehicle_id}/location", response_model=VehicleOut)
+def report_location(
+    vehicle_id: uuid.UUID,
+    payload: VehicleLocationPing,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    A driver reporting where their currently-assigned vehicle is right
+    now — see DriverDashboard's periodic ping while a trip is
+    assigned/in_progress. Restricted to the driver actually on an active
+    trip with this vehicle, not just any driver: last_location directly
+    feeds which vehicle gets picked for the next trip, so letting anyone
+    overwrite it would make that signal worthless.
+    """
+    vehicle = db.get(Vehicle, vehicle_id)
+    if vehicle is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found"
+        )
+
+    is_assigned_driver = (
+        current_user.role == UserRole.driver
+        and db.query(Trip)
+        .filter(Trip.vehicle_id == vehicle_id)
+        .filter(Trip.driver_id == current_user.id)
+        .filter(Trip.status.in_([TripStatus.assigned, TripStatus.in_progress]))
+        .first()
+        is not None
+    )
+    if not is_assigned_driver:
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only the driver currently assigned to this vehicle can report its location",
+        )
+
+    vehicle.last_location = WKTElement(f"POINT({payload.lng} {payload.lat})", srid=4326)
+    vehicle.last_location_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(vehicle)
     return vehicle

@@ -1,7 +1,8 @@
 import uuid
+from datetime import datetime
 
 from geoalchemy2 import Geography
-from sqlalchemy import Enum, ForeignKey, Integer, String
+from sqlalchemy import DateTime, Enum, ForeignKey, Integer, String
 from sqlalchemy.dialects.postgresql import UUID
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -53,4 +54,13 @@ class Vehicle(Base, TimestampMixin):
     last_location = mapped_column(
         Geography(geometry_type="POINT", srid=4326, spatial_index=False),
         nullable=True,
+    )
+    # When last_location was actually recorded — every write path (home-
+    # base seed, trip-completion capture, dispatcher manual override,
+    # driver location ping) sets this alongside last_location. Without
+    # it there's no way to tell a fresh position from one a driver's
+    # phone stopped sending an hour ago; see
+    # dispatch_config.VEHICLE_LOCATION_STALE_MINUTES.
+    last_location_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
     )

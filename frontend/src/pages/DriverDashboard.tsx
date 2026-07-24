@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import {
   ArrowDownToLine,
@@ -98,6 +98,35 @@ function TripCard({
     (a, b) => (a.pickup_lng ?? 0) - (b.pickup_lng ?? 0)
   );
   const canReportIssue = trip.status === "assigned" || trip.status === "in_progress";
+
+  // Periodic location ping while this vehicle is actually out on a
+  // trip — feeds dispatch_service's proximity-based vehicle assignment
+  // and route ordering (see backend Phase 4). Best-effort only: a
+  // denied permission or a failed request must never interrupt the
+  // driver's actual flow, so every failure path here is silent.
+  useEffect(() => {
+    const active = trip.status === "assigned" || trip.status === "in_progress";
+    if (!active || !trip.vehicle_id || !("geolocation" in navigator)) return;
+
+    const ping = () => {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          api.vehicles
+            .reportLocation(trip.vehicle_id as string, {
+              lat: pos.coords.latitude,
+              lng: pos.coords.longitude,
+            })
+            .catch(() => {});
+        },
+        () => {},
+        { enableHighAccuracy: false, timeout: 10_000, maximumAge: 20_000 }
+      );
+    };
+
+    ping();
+    const id = setInterval(ping, 30_000);
+    return () => clearInterval(id);
+  }, [trip.vehicle_id, trip.status]);
 
   const advance = async (next: TripStatus, label: string) => {
     try {

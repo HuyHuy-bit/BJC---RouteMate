@@ -12,6 +12,7 @@ class TripOut(BaseModel):
     id: uuid.UUID
     status: TripStatus
     driver_id: uuid.UUID | None
+    vehicle_id: uuid.UUID | None
     vehicle_label: str | None
     is_private: bool
     bookings: list[BookingOut]

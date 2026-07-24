@@ -72,6 +72,7 @@ def _to_trip_out(trip: Trip) -> TripOut:
         id=trip.id,
         status=trip.status,
         driver_id=trip.driver_id,
+        vehicle_id=trip.vehicle_id,
         vehicle_label=trip.vehicle_label,
         is_private=len(trip.bookings) == 1 and trip.bookings[0].is_private,
         bookings=bookings_out,
@@ -504,6 +505,7 @@ def update_trip_status(
                     vehicle.last_location = WKTElement(
                         f"POINT({dropoff.x} {dropoff.y})", srid=4326
                     )
+                    vehicle.last_location_at = datetime.now(timezone.utc)
 
     elif payload.status == TripStatus.cancelled:
         trip.cancelled_at = datetime.now(timezone.utc)
