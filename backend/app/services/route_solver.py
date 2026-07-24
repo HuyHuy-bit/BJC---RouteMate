@@ -6,13 +6,24 @@ rider's pickup must come before their own dropoff (stops from different
 riders can freely interleave, e.g. pick up A, pick up B, drop off A, drop
 off B — realistic for a shared van).
 
-For n riders there are 2n stops. The number of valid orderings is
+For n riders there are 2n stops. The number of VALID orderings is
 (2n)! / 2^n (dropoff-before-pickup orderings are pruned during
-construction, not generated and thrown away). At the n<=4 seats this app
-allows, that's at most 2520 candidate orderings — cheap to brute-force
-exactly in Python; no need for an approximate heuristic here.
+construction, never generated and thrown away). At the n<=4 seats this
+app allows, that's at most 2520 candidate orderings — cheap to
+brute-force exactly, and branch-and-bound pruning makes it far cheaper in
+practice.
+
+`solve_pdp` is the shared core: it takes a `cost(i, j)` callback so the
+same exact search can minimize either straight-line distance (the
+`best_route` convenience wrapper) or real road-network duration (used by
+pool_insertion, passing a precomputed duration matrix). This is what
+lets pool_insertion drop its old raw-`itertools.permutations` search,
+which capped the number of RAW permutations inspected (40,320 at 4
+riders) below the cap before all VALID orderings (2,520) were even seen,
+silently biasing results toward whoever joined the pool first.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from uuid import UUID
 
@@ -27,6 +38,68 @@ class Stop:
     lng: float
 
 
+def solve_pdp(
+    kinds: list[str],
+    owners: list,
+    cost: Callable[[int, int], float],
+) -> tuple[float, list[int]]:
+    """
+    Minimum-cost pickup-and-delivery ordering over `len(kinds)` stops, by
+    exact constrained backtracking with branch-and-bound pruning.
+
+    Each stop index i is a pickup or dropoff (`kinds[i]`) belonging to
+    `owners[i]`; the only hard constraint is that an owner's pickup
+    precedes their own dropoff. `cost(i, j)` is the leg cost from stop i
+    to stop j — any non-negative metric (distance or duration).
+
+    Returns `(best_total_cost, ordered_stop_indices)`. Because
+    dropoff-before-own-pickup branches are never entered, this only ever
+    generates VALID orderings — so, unlike a raw-permutation search, it
+    can't be truncated by a cap that fires before all valid orderings
+    are seen.
+    """
+    n = len(kinds)
+    if n == 0:
+        return 0.0, []
+
+    used = [False] * n
+    picked: set = set()
+    seq: list[int] = []
+    best_cost = float("inf")
+    best_order: list[int] = []
+
+    def backtrack(running: float) -> None:
+        nonlocal best_cost, best_order
+        # Branch-and-bound: every remaining leg is non-negative, so a
+        # partial route already at or above the best complete route
+        # found so far can never beat it — abandon it now.
+        if running >= best_cost:
+            return
+        if len(seq) == n:
+            best_cost = running
+            best_order = list(seq)
+            return
+        for i in range(n):
+            if used[i]:
+                continue
+            if kinds[i] == "dropoff" and owners[i] not in picked:
+                continue  # can't drop off before that rider's pickup
+            step = 0.0 if not seq else cost(seq[-1], i)
+            used[i] = True
+            is_pickup = kinds[i] == "pickup"
+            if is_pickup:
+                picked.add(owners[i])
+            seq.append(i)
+            backtrack(running + step)
+            seq.pop()
+            if is_pickup:
+                picked.discard(owners[i])
+            used[i] = False
+
+    backtrack(0.0)
+    return best_cost, best_order
+
+
 def _stops_for(members: list[Candidate]) -> list[Stop]:
     stops = []
     for m in members:
@@ -35,66 +108,34 @@ def _stops_for(members: list[Candidate]) -> list[Stop]:
     return stops
 
 
-def _route_distance(order: list[Stop]) -> float:
-    total = 0.0
-    for a, b in zip(order, order[1:]):
-        total += haversine_m(a.lat, a.lng, b.lat, b.lng)
-    return total
-
-
 def best_route(members: list[Candidate]) -> tuple[float, list[Stop]]:
     """
     Returns (total_distance_meters, ordered_stops) for the shortest valid
-    stop sequence. For a single rider this is just their direct
-    pickup->dropoff distance.
+    stop sequence, using straight-line (haversine) distance. For a single
+    rider this is just their direct pickup->dropoff distance.
+
+    Thin wrapper over solve_pdp — retained as the distance-based entry
+    point and as an independently-testable reference implementation of
+    the exact search.
     """
     if not members:
         return 0.0, []
+    stops = _stops_for(members)
     if len(members) == 1:
         m = members[0]
-        stops = _stops_for(members)
-        return haversine_m(m.pickup_lat, m.pickup_lng, m.dropoff_lat, m.dropoff_lng), stops
+        return (
+            haversine_m(m.pickup_lat, m.pickup_lng, m.dropoff_lat, m.dropoff_lng),
+            stops,
+        )
 
-    stops = _stops_for(members)
-    picked_up: set[UUID] = set()
-    used = [False] * len(stops)
-    sequence: list[int] = []
+    kinds = [s.kind for s in stops]
+    owners = [s.booking_id for s in stops]
 
-    best_cost = float("inf")
-    best_order: list[Stop] = []
+    def cost(i: int, j: int) -> float:
+        return haversine_m(stops[i].lat, stops[i].lng, stops[j].lat, stops[j].lng)
 
-    def backtrack():
-        nonlocal best_cost, best_order
-        if len(sequence) == len(stops):
-            order = [stops[i] for i in sequence]
-            cost = _route_distance(order)
-            if cost < best_cost:
-                best_cost = cost
-                best_order = order
-            return
-
-        for i, stop in enumerate(stops):
-            if used[i]:
-                continue
-            if stop.kind == "dropoff" and stop.booking_id not in picked_up:
-                continue  # can't drop off before that rider's pickup
-
-            used[i] = True
-            added_pickup = False
-            if stop.kind == "pickup":
-                picked_up.add(stop.booking_id)
-                added_pickup = True
-            sequence.append(i)
-
-            backtrack()
-
-            sequence.pop()
-            if added_pickup:
-                picked_up.discard(stop.booking_id)
-            used[i] = False
-
-    backtrack()
-    return best_cost, best_order
+    total, order = solve_pdp(kinds, owners, cost)
+    return total, [stops[i] for i in order]
 
 
 def pickup_order_ranks(ordered_stops: list[Stop]) -> dict[UUID, int]:

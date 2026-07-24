@@ -20,7 +20,6 @@ Two things here that the previous implementation could not do at all:
 
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
-from itertools import permutations
 from uuid import UUID
 
 from app.core.dispatch_config import (
@@ -36,16 +35,12 @@ from app.core.dispatch_config import (
     WEIGHT_WORST_DETOUR,
 )
 from app.services.geo import haversine_m
+from app.services.route_solver import solve_pdp
 from app.services.routing import Coord, routing_service
 
 # Beyond this straight-line gap there is no plausible road route worth
 # evaluating on this corridor; used only as a free pre-filter.
 COARSE_PREFILTER_METERS = 25_000
-
-# Permutation budget. At 4 passengers an exact search is ~2520 orderings,
-# which is cheap — but this caps pathological cases so an optimizer can
-# never hang a request.
-MAX_PERMUTATIONS = 5_000
 
 
 @dataclass
@@ -120,33 +115,48 @@ def _windows_overlap(a: datetime, b: datetime) -> bool:
     ) <= PICKUP_WINDOW_MINUTES * 60
 
 
-def _valid_orderings(members: list[PoolMember]):
-    """
-    Yields every stop ordering where each passenger's pickup precedes
-    their own dropoff. Passengers may otherwise interleave freely, which
-    is what a real shared van does.
-    """
+def _stops_of(members: list[PoolMember]) -> list[Stop]:
+    """The 2n pickup/dropoff stops for a set of members, pickup then
+    dropoff per member — the stable ordering solve_pdp indexes into."""
     stops: list[Stop] = []
     for m in members:
         stops.append(Stop(m.booking_id, "pickup", m.pickup))
         stops.append(Stop(m.booking_id, "dropoff", m.dropoff))
+    return stops
 
-    seen = 0
-    for perm in permutations(range(len(stops))):
-        seen += 1
-        if seen > MAX_PERMUTATIONS:
-            return
-        picked: set[UUID] = set()
-        ok = True
-        for idx in perm:
-            s = stops[idx]
-            if s.kind == "pickup":
-                picked.add(s.booking_id)
-            elif s.booking_id not in picked:
-                ok = False
-                break
-        if ok:
-            yield [stops[i] for i in perm]
+
+def _best_ordering(
+    members: list[PoolMember],
+    durations: dict[tuple[int, int], float],
+    index: dict[tuple[UUID, str], int],
+) -> tuple[float, list[Stop]]:
+    """
+    Exact minimum-duration valid stop ordering for `members`, via the
+    shared branch-and-bound PDP solver. Replaces the old
+    raw-permutation search whose MAX_PERMUTATIONS cap could fire before
+    every valid ordering was even seen (40,320 raw permutations at 4
+    riders vs. only 2,520 valid ones), biasing the result toward
+    whoever joined the pool first.
+
+    `durations`/`index` are the batched leg matrix and the
+    coord-position lookup already built by evaluate_insertion — the
+    solver's cost callback reads real road-network leg times straight
+    out of them.
+    """
+    stops = _stops_of(members)
+    if not stops:
+        return 0.0, []
+    kinds = [s.kind for s in stops]
+    owners = [s.booking_id for s in stops]
+
+    def cost(i: int, j: int) -> float:
+        return durations[
+            (index[(stops[i].booking_id, stops[i].kind)],
+             index[(stops[j].booking_id, stops[j].kind)])
+        ]
+
+    total, order = solve_pdp(kinds, owners, cost)
+    return total, [stops[i] for i in order]
 
 
 def _leg_lookup(coords: list[Coord]) -> dict[tuple[int, int], float]:
@@ -201,19 +211,9 @@ def evaluate_insertion(
 
     durations = _leg_lookup(coords)
 
-    # ---- Stage 3: exact ordering within budget ---------------------
-    best_order: list[Stop] | None = None
-    best_total = float("inf")
-
-    for ordering in _valid_orderings(everyone):
-        total = 0.0
-        for a, b in zip(ordering, ordering[1:]):
-            total += durations[(index[(a.booking_id, a.kind)], index[(b.booking_id, b.kind)])]
-        if total < best_total:
-            best_total = total
-            best_order = ordering
-
-    if best_order is None:
+    # ---- Stage 3: exact ordering (branch-and-bound, no cap) --------
+    best_total, best_order = _best_ordering(everyone, durations, index)
+    if not best_order:
         return InsertionResult(False, "no valid stop ordering found")
 
     # ---- Stage 4: per-passenger service guarantee ------------------
@@ -312,12 +312,5 @@ def _baseline_without(
     """Best route duration for the pool as it stands, before insertion."""
     if not members:
         return 0.0
-    best = float("inf")
-    for ordering in _valid_orderings(members):
-        total = 0.0
-        for a, b in zip(ordering, ordering[1:]):
-            total += durations[
-                (index[(a.booking_id, a.kind)], index[(b.booking_id, b.kind)])
-            ]
-        best = min(best, total)
-    return 0.0 if best == float("inf") else best
+    total, _ = _best_ordering(members, durations, index)
+    return total
