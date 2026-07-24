@@ -1,7 +1,8 @@
 import uuid
 from datetime import datetime
+from typing import Literal
 
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from app.models.enums import TripStatus
 from app.schemas.booking import BookingOut
@@ -32,16 +33,22 @@ class TripStatusUpdate(BaseModel):
     status: TripStatus
 
 
+class TripReportIssue(BaseModel):
+    reason: Literal["breakdown", "accident", "driver_unavailable", "other"]
+    notes: str | None = Field(default=None, max_length=500)
+
+
 class AttentionItem(BaseModel):
     """
-    A forming pool that needs a human decision right now — either it
-    couldn't fill by deadline (escalated) or the fleet is fully
-    committed (no_vehicle). Previously these were only ever written to
-    the dispatch_events audit log; nothing ever surfaced them to a
-    dispatcher.
+    A trip that needs a human decision right now — a forming pool that
+    couldn't fill by deadline (escalated), the fleet is fully committed
+    (no_vehicle), or a trip a driver reported disrupted couldn't find a
+    replacement vehicle on its own (vehicle_down). Previously these were
+    only ever written to the dispatch_events audit log; nothing ever
+    surfaced them to a dispatcher.
     """
 
-    kind: str  # "escalated" | "no_vehicle"
+    kind: str  # "escalated" | "no_vehicle" | "vehicle_down"
     trip_id: uuid.UUID
     direction: str
     passenger_count: int

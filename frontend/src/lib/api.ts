@@ -8,8 +8,11 @@ import type {
   MatchingRunResult,
   MergeTripsResult,
   NotificationOut,
+  PaymentCollect,
+  PaymentOut,
   TokenPair,
   TripOut,
+  TripReportIssue,
   TripStatus,
   UserOut,
   UserRole,
@@ -101,10 +104,24 @@ export const api = {
       apiClient
         .post<MergeTripsResult>(`/dispatch/trips/${sourceId}/merge/${targetId}`)
         .then((r) => r.data),
+    reportIssue: (tripId: string, payload: TripReportIssue) =>
+      apiClient
+        .post<TripOut>(`/dispatch/trips/${tripId}/report-issue`, payload)
+        .then((r) => r.data),
   },
   notifications: {
     list: () =>
       apiClient.get<NotificationOut[]>("/notifications").then((r) => r.data),
+  },
+  payments: {
+    collect: (bookingId: string, payload: PaymentCollect) =>
+      apiClient
+        .post<PaymentOut>(`/payments/${bookingId}/collect`, payload)
+        .then((r) => r.data),
+    adjust: (bookingId: string, payload: { status: string; notes?: string | null }) =>
+      apiClient
+        .patch<PaymentOut>(`/payments/${bookingId}`, payload)
+        .then((r) => r.data),
   },
   geocode: (address: string) =>
     apiClient

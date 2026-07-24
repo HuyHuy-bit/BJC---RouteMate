@@ -27,6 +27,9 @@ class Trip(Base, TimestampMixin):
         UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
     )
 
+    corridor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("corridors.id"), index=True
+    )
     direction: Mapped[BookingDirection] = mapped_column(
         Enum(
             BookingDirection,

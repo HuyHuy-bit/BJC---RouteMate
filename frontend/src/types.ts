@@ -66,6 +66,27 @@ export interface BookingCreate {
   is_private: boolean;
 }
 
+export type PaymentMethod = "cash" | "bank_transfer" | "other";
+export type PaymentStatus = "pending" | "collected" | "disputed" | "waived";
+
+export interface PaymentOut {
+  id: string;
+  booking_id: string;
+  method: PaymentMethod;
+  expected_amount_vnd: number;
+  collected_amount_vnd: number | null;
+  status: PaymentStatus;
+  collected_by_user_id: string | null;
+  collected_at: string | null;
+  notes: string | null;
+}
+
+export interface PaymentCollect {
+  method: PaymentMethod;
+  collected_amount_vnd: number;
+  notes?: string | null;
+}
+
 export interface BookingOut {
   id: string;
   customer: CustomerOut;
@@ -81,6 +102,7 @@ export interface BookingOut {
   price_vnd: number;
   status: BookingStatus;
   trip_id: string | null;
+  payment: PaymentOut | null;
   created_at: string;
 }
 
@@ -120,6 +142,7 @@ export interface VehicleOut {
   seat_capacity: number;
   status: VehicleStatus;
   default_driver_id: string | null;
+  home_corridor_id: string | null;
 }
 
 export interface VehicleCreate {
@@ -127,16 +150,31 @@ export interface VehicleCreate {
   label?: string | null;
   seat_capacity: number;
   default_driver_id?: string | null;
+  home_corridor_id?: string | null;
 }
 
 export interface VehicleUpdate {
   label?: string | null;
   status?: VehicleStatus;
   default_driver_id?: string | null;
+  home_corridor_id?: string | null;
+  last_location_lat?: number | null;
+  last_location_lng?: number | null;
+}
+
+export type TripReportIssueReason =
+  | "breakdown"
+  | "accident"
+  | "driver_unavailable"
+  | "other";
+
+export interface TripReportIssue {
+  reason: TripReportIssueReason;
+  notes?: string | null;
 }
 
 export interface AttentionItem {
-  kind: "escalated" | "no_vehicle";
+  kind: "escalated" | "no_vehicle" | "vehicle_down";
   trip_id: string;
   direction: BookingDirection;
   passenger_count: number;

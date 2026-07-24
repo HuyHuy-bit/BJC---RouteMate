@@ -11,7 +11,11 @@ from app.models.enums import BookingStatus, UserRole
 from app.models.user import User
 from app.schemas.booking import BookingCreate, BookingOut
 from app.services.audit import log_pii_access
-from app.services.booking_service import create_booking, to_booking_out
+from app.services.booking_service import (
+    OutsideServiceAreaError,
+    create_booking,
+    to_booking_out,
+)
 from app.services.customer_service import get_or_create_customer
 from app.services.dispatch_service import assign_booking, detach_booking_from_trip
 from app.services.notification_service import notify_booking_cancelled
@@ -28,7 +32,14 @@ def create_booking_route(
     current_user: User = Depends(get_current_user),
 ):
     customer = get_or_create_customer(db, payload.customer)
-    booking = create_booking(db, customer, payload)
+    try:
+        booking = create_booking(db, customer, payload)
+    except OutsideServiceAreaError:
+        db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Địa điểm nằm ngoài các tuyến đang phục vụ hiện tại.",
+        )
 
     log_pii_access(
         db,
@@ -67,7 +78,7 @@ def list_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(Booking).options(joinedload(Booking.customer))
+    query = db.query(Booking).options(joinedload(Booking.customer), joinedload(Booking.payment))
     if status_filter:
         query = query.filter(Booking.status == status_filter)
     bookings = query.order_by(Booking.created_at.desc()).all()
@@ -92,7 +103,7 @@ def get_booking(
 ):
     booking = (
         db.query(Booking)
-        .options(joinedload(Booking.customer))
+        .options(joinedload(Booking.customer), joinedload(Booking.payment))
         .filter(Booking.id == booking_id)
         .first()
     )
@@ -127,7 +138,7 @@ def cancel_booking(
     """
     booking = (
         db.query(Booking)
-        .options(joinedload(Booking.customer))
+        .options(joinedload(Booking.customer), joinedload(Booking.payment))
         .filter(Booking.id == booking_id)
         .first()
     )
@@ -169,7 +180,7 @@ def mark_no_show(
     """
     booking = (
         db.query(Booking)
-        .options(joinedload(Booking.customer), joinedload(Booking.trip))
+        .options(joinedload(Booking.customer), joinedload(Booking.payment), joinedload(Booking.trip))
         .filter(Booking.id == booking_id)
         .first()
     )
@@ -217,7 +228,7 @@ def unassign_booking(
     """
     booking = (
         db.query(Booking)
-        .options(joinedload(Booking.customer))
+        .options(joinedload(Booking.customer), joinedload(Booking.payment))
         .filter(Booking.id == booking_id)
         .first()
     )

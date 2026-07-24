@@ -13,6 +13,7 @@ from app.api.v1.routes import (
     geocode,
     health,
     notifications,
+    payments,
     users,
     vehicles,
 )
@@ -47,5 +48,6 @@ app.include_router(vehicles.router, prefix="/api/v1/vehicles")
 app.include_router(customers.router, prefix="/api/v1/customers")
 app.include_router(bookings.router, prefix="/api/v1/bookings")
 app.include_router(dispatch.router, prefix="/api/v1/dispatch")
+app.include_router(payments.router, prefix="/api/v1/payments")
 app.include_router(geocode.router, prefix="/api/v1/geocode")
 app.include_router(notifications.router, prefix="/api/v1/notifications")

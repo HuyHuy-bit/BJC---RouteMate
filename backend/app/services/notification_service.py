@@ -57,6 +57,14 @@ def _compose_cancelled_message(booking: Booking, reason: str) -> str:
     )
 
 
+def _compose_disrupted_message(booking: Booking) -> str:
+    return (
+        f"Chào {booking.customer.full_name}, xe của bạn gặp sự cố. "
+        f"Chúng tôi đang tìm xe thay thế và sẽ báo lại thời gian đón mới sớm nhất. "
+        f"Xin lỗi vì sự bất tiện này."
+    )
+
+
 def notify_trip_sealed(db: Session, trip: Trip) -> list[Notification]:
     """Called once a pool is sealed — the customer's ride is now real."""
     created = []
@@ -101,3 +109,23 @@ def notify_booking_cancelled(db: Session, booking: Booking, reason: str) -> Noti
     )
     db.add(note)
     return note
+
+
+def notify_trip_disrupted(db: Session, trip: Trip) -> list[Notification]:
+    """Called when a driver reports a breakdown/issue mid-trip — see
+    dispatch_service.py:report_trip_disrupted. A replacement-vehicle
+    assignment (or lack of one) is notified separately, same as any
+    other seal, via notify_trip_sealed."""
+    created = []
+    for booking in trip.bookings:
+        if booking.status.value in ("cancelled", "no_show"):
+            continue
+        note = Notification(
+            booking_id=booking.id,
+            trip_id=trip.id,
+            event="disrupted",
+            message=_compose_disrupted_message(booking),
+        )
+        db.add(note)
+        created.append(note)
+    return created

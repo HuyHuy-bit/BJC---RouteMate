@@ -2,6 +2,8 @@ import uuid
 from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from geoalchemy2.elements import WKTElement
+from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, require_role
@@ -24,6 +26,7 @@ from app.schemas.trip import (
     MergeTripsResult,
     TripAssignDriver,
     TripOut,
+    TripReportIssue,
     TripStatusUpdate,
 )
 from app.services.audit import log_pii_access
@@ -31,6 +34,7 @@ from app.services.booking_service import to_booking_out
 from app.services.dispatch_engine import SealDecision, evaluate_pool
 from app.services.dispatch_service import (
     merge_trips,
+    report_trip_disrupted,
     seal_trip,
     log_event,
     pool_snapshot,
@@ -51,7 +55,11 @@ ALLOWED_TRANSITIONS: dict[TripStatus, set[TripStatus]] = {
         TripStatus.reassigning,
         TripStatus.cancelled,
     },
-    TripStatus.in_progress: {TripStatus.completed, TripStatus.cancelled},
+    TripStatus.in_progress: {
+        TripStatus.completed,
+        TripStatus.reassigning,
+        TripStatus.cancelled,
+    },
     TripStatus.reassigning: {TripStatus.assigned, TripStatus.cancelled},
     TripStatus.completed: set(),
     TripStatus.cancelled: set(),
@@ -76,7 +84,7 @@ def _to_trip_out(trip: Trip) -> TripOut:
 def _load_trip(db: Session, trip_id: uuid.UUID) -> Trip:
     trip = (
         db.query(Trip)
-        .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.id == trip_id)
         .first()
     )
@@ -102,7 +110,7 @@ def run_dispatch(
 
     full_trips = (
         db.query(Trip)
-        .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.status.in_([TripStatus.assigned, TripStatus.sealed]))
         .order_by(Trip.created_at.desc())
         .all()
@@ -131,7 +139,7 @@ def list_trips(
 ):
     trips = (
         db.query(Trip)
-        .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.bookings.any())
         .filter(Trip.status.notin_([TripStatus.completed, TripStatus.cancelled]))
         .order_by(Trip.created_at.desc())
@@ -147,7 +155,7 @@ def my_trips(
 ):
     trips = (
         db.query(Trip)
-        .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.driver_id == current_user.id)
         .filter(Trip.status.in_([TripStatus.assigned, TripStatus.in_progress]))
         .filter(Trip.bookings.any())
@@ -171,7 +179,7 @@ def trip_history(
     """
     trips = (
         db.query(Trip)
-        .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.status.in_([TripStatus.completed, TripStatus.cancelled]))
         .filter(Trip.bookings.any())
         .order_by(
@@ -202,7 +210,7 @@ def my_trip_history(
     """Same as /history, scoped to trips this driver actually drove."""
     trips = (
         db.query(Trip)
-        .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.driver_id == current_user.id)
         .filter(Trip.status.in_([TripStatus.completed, TripStatus.cancelled]))
         .filter(Trip.bookings.any())
@@ -229,7 +237,7 @@ def list_attention_items(
     now = datetime.now(timezone.utc)
     trips = (
         db.query(Trip)
-        .options(joinedload(Trip.bookings).joinedload(Booking.customer))
+        .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.status == TripStatus.forming)
         .filter(Trip.bookings.any())
         .all()
@@ -285,6 +293,40 @@ def list_attention_items(
                     bookings=[to_booking_out(b) for b in active],
                 )
             )
+
+    # Trips a driver reported disrupted (see report_trip_disrupted) that
+    # couldn't find a replacement vehicle right away — the automatic
+    # cycle keeps retrying these every tick, but a dispatcher needs to
+    # see them in the meantime, same as any other no_vehicle situation.
+    disrupted_trips = (
+        db.query(Trip)
+        .options(
+            joinedload(Trip.bookings).joinedload(Booking.customer),
+            joinedload(Trip.bookings).joinedload(Booking.payment),
+        )
+        .filter(Trip.status == TripStatus.reassigning)
+        .filter(Trip.vehicle_id.is_(None))
+        .filter(Trip.bookings.any())
+        .all()
+    )
+    for trip in disrupted_trips:
+        active = [
+            b for b in trip.bookings if b.status.value not in ("cancelled", "no_show")
+        ]
+        if not active:
+            continue
+        items.append(
+            AttentionItem(
+                kind="vehicle_down",
+                trip_id=trip.id,
+                direction=trip.direction.value,
+                passenger_count=len(active),
+                minutes_overdue=0.0,
+                reason="Xe gặp sự cố, đang chờ xe thay thế",
+                options=None,
+                bookings=[to_booking_out(b) for b in active],
+            )
+        )
 
     return items
 
@@ -445,6 +487,24 @@ def update_trip_status(
             if b.status.value not in ("cancelled", "no_show"):
                 b.status = BookingStatus.completed
 
+        # Cheapest real signal of where this vehicle actually is: wherever
+        # it just dropped its last passenger. last_location used to be
+        # written nowhere at all, which meant the next vehicle assignment
+        # had zero location data to work with — see
+        # dispatch_service.py:_assign_vehicle.
+        if trip.vehicle_id is not None:
+            active = [
+                b for b in trip.bookings if b.status.value not in ("cancelled", "no_show")
+            ]
+            if active:
+                last_stop = max(active, key=lambda b: (b.stop_order or 0))
+                dropoff = to_shape(last_stop.dropoff_point)
+                vehicle = db.get(Vehicle, trip.vehicle_id)
+                if vehicle is not None:
+                    vehicle.last_location = WKTElement(
+                        f"POINT({dropoff.x} {dropoff.y})", srid=4326
+                    )
+
     elif payload.status == TripStatus.cancelled:
         trip.cancelled_at = datetime.now(timezone.utc)
         for b in trip.bookings:
@@ -454,6 +514,51 @@ def update_trip_status(
     if payload.status in (TripStatus.completed, TripStatus.cancelled):
         release_vehicle_if_free(db, trip)
 
+    db.commit()
+    db.refresh(trip)
+    return _to_trip_out(trip)
+
+
+@router.post("/trips/{trip_id}/report-issue", response_model=TripOut)
+def report_issue(
+    trip_id: uuid.UUID,
+    payload: TripReportIssue,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    A driver (or staff, on a driver's behalf) reports a trip can't
+    continue as assigned — breakdown, accident, or otherwise. See
+    dispatch_service.py:report_trip_disrupted for what this actually
+    does: it doesn't just flip a status, it tries to recover the trip
+    onto a different vehicle immediately, keeping the same route and
+    passengers.
+    """
+    trip = _load_trip(db, trip_id)
+
+    is_staff = current_user.role in (UserRole.admin, UserRole.dispatcher)
+    is_assigned_driver = (
+        current_user.role == UserRole.driver and trip.driver_id == current_user.id
+    )
+    if not (is_staff or is_assigned_driver):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Only staff or this trip's assigned driver can report an issue",
+        )
+
+    if TripStatus.reassigning not in ALLOWED_TRANSITIONS.get(trip.status, set()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Cannot report an issue on a trip that is {trip.status.value}",
+        )
+
+    report_trip_disrupted(
+        db,
+        trip,
+        reason=payload.reason,
+        notes=payload.notes,
+        actor_user_id=current_user.id,
+    )
     db.commit()
     db.refresh(trip)
     return _to_trip_out(trip)

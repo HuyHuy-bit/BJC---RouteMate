@@ -39,6 +39,9 @@ class Booking(Base, TimestampMixin):
     trip_id: Mapped[uuid.UUID | None] = mapped_column(
         ForeignKey("trips.id"), nullable=True
     )
+    corridor_id: Mapped[uuid.UUID] = mapped_column(
+        ForeignKey("corridors.id"), index=True
+    )
 
     pickup_address: Mapped[str] = mapped_column(
         "pickup_address_encrypted", EncryptedString(255)
@@ -93,3 +96,6 @@ class Booking(Base, TimestampMixin):
 
     customer: Mapped["Customer"] = relationship(back_populates="bookings")
     trip: Mapped["Trip | None"] = relationship(back_populates="bookings")
+    payment: Mapped["Payment | None"] = relationship(
+        back_populates="booking", uselist=False
+    )

@@ -40,6 +40,15 @@ class Vehicle(Base, TimestampMixin):
         ForeignKey("users.id"), nullable=True
     )
 
+    # Which corridor this vehicle is based on, if known. Nullable on
+    # purpose — an untagged vehicle stays assignable anywhere rather than
+    # being excluded from dispatch over a tagging gap; see
+    # dispatch_service.py:_assign_vehicle for how this is used to prefer
+    # (not require) an in-corridor vehicle.
+    home_corridor_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("corridors.id"), nullable=True, index=True
+    )
+
     # Last known position, for choosing the nearest available car.
     last_location = mapped_column(
         Geography(geometry_type="POINT", srid=4326, spatial_index=False),

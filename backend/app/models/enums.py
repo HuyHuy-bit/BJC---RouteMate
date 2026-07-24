@@ -46,6 +46,19 @@ class VehicleStatus(str, enum.Enum):
     inactive = "inactive"
 
 
+class PaymentMethod(str, enum.Enum):
+    cash = "cash"
+    bank_transfer = "bank_transfer"
+    other = "other"
+
+
+class PaymentStatus(str, enum.Enum):
+    pending = "pending"       # not yet collected
+    collected = "collected"   # collected amount met or exceeded what was owed
+    disputed = "disputed"     # collected less than owed — needs reconciliation
+    waived = "waived"         # staff decided not to collect (goodwill, error, etc.)
+
+
 class DispatchEventType(str, enum.Enum):
     """Audit trail. Every automatic decision is recorded alongside manual
     overrides, so a disputed trip can always be reconstructed."""

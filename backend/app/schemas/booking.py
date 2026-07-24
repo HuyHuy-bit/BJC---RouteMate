@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 
 from app.models.enums import BookingDirection, BookingStatus
 from app.schemas.customer import CustomerCreate, CustomerOut
+from app.schemas.payment import PaymentOut
 
 
 class BookingCreate(BaseModel):
@@ -42,4 +43,5 @@ class BookingOut(BaseModel):
     price_vnd: int
     status: BookingStatus
     trip_id: uuid.UUID | None
+    payment: PaymentOut | None
     created_at: datetime

@@ -47,7 +47,7 @@ from app.services.pool_insertion import (
     evaluate_insertion,
 )
 from app.services.routing import routing_service
-from app.services.notification_service import notify_trip_sealed
+from app.services.notification_service import notify_trip_disrupted, notify_trip_sealed
 
 logger = logging.getLogger(__name__)
 
@@ -178,6 +178,13 @@ def find_pool_for_booking(db: Session, booking: Booking) -> Trip | None:
         select(Trip)
         .where(Trip.status == TripStatus.forming)
         .where(Trip.direction == booking.direction)
+        # Corridor-scoped: without this, two corridors that happen to
+        # pass near each other (both radiating from Hà Nội, say) could
+        # pool bookings that aren't actually on the same route just
+        # because they're geometrically close. Costs nothing while only
+        # one corridor exists; becomes load-bearing the moment a second
+        # one does.
+        .where(Trip.corridor_id == booking.corridor_id)
         .where(
             (Trip.departure_deadline.is_(None))
             | (Trip.departure_deadline >= booking.requested_pickup_at - window)
@@ -254,6 +261,11 @@ def find_returning_vehicle(db: Session, booking: Booking) -> Vehicle | None:
             .where(Trip.direction == BookingDirection.outbound)
             .where(Trip.status.in_([TripStatus.assigned, TripStatus.in_progress]))
             .where(Trip.vehicle_id.isnot(None))
+            # A van finishing an outbound run on a different corridor
+            # isn't "going back the same way" this return passenger
+            # needs — only a same-corridor outbound trip is a genuine
+            # free-mileage match.
+            .where(Trip.corridor_id == booking.corridor_id)
         )
         .scalars()
         .all()
@@ -330,6 +342,7 @@ def assign_booking(db: Session, booking: Booking) -> Trip:
 
         trip = Trip(
             direction=booking.direction,
+            corridor_id=booking.corridor_id,
             status=TripStatus.forming,
             departure_deadline=booking.requested_pickup_at
             + timedelta(minutes=MAX_POOL_WAIT_MINUTES),
@@ -429,15 +442,32 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
         # than blocking this trip's departure entirely.
         trip.vehicle_id = None
 
-    vehicle = (
-        db.execute(
-            select(Vehicle)
-            .where(Vehicle.status == VehicleStatus.available)
-            .limit(1)
+    # Used to be "whichever available vehicle the database happens to
+    # return first" — no ordering at all, and Vehicle.last_location was
+    # written nowhere and read nowhere. That meant a car parked at one
+    # end of the corridor could get sent to a pickup at the other end
+    # while a closer car sat idle. Order by real distance to where this
+    # trip actually needs a car (its centroid, already maintained by
+    # _refresh_pool_geometry); a vehicle with no known location sorts
+    # last rather than being excluded outright — never block a trip's
+    # departure over a location-tracking gap.
+    base_query = select(Vehicle).where(Vehicle.status == VehicleStatus.available)
+    if trip.centroid is not None:
+        order_expr = func.coalesce(
+            func.ST_Distance(Vehicle.last_location, trip.centroid), 1_000_000_000
         )
+        base_query = base_query.order_by(order_expr)
+
+    # Prefer a vehicle homed on this trip's corridor; only fall back to
+    # an out-of-corridor or untagged vehicle if none is available there —
+    # again, never block dispatch over a tagging gap.
+    vehicle = (
+        db.execute(base_query.where(Vehicle.home_corridor_id == trip.corridor_id).limit(1))
         .scalars()
         .first()
     )
+    if vehicle is None:
+        vehicle = db.execute(base_query.limit(1)).scalars().first()
     if vehicle is None:
         return None
 
@@ -631,6 +661,62 @@ def merge_trips(
     )
 
 
+DISRUPTION_MEANS_BREAKDOWN = {"breakdown", "accident"}
+
+
+def report_trip_disrupted(
+    db: Session,
+    trip: Trip,
+    reason: str,
+    notes: str | None,
+    actor_user_id: UUID | None,
+) -> Trip:
+    """
+    A driver or dispatcher reports a trip can't continue as assigned —
+    breakdown, accident, or the driver simply can't take it. Before this,
+    TripStatus.reassigning and DispatchEventType.driver_rejected existed
+    as enum values with zero code path ever setting or emitting them: a
+    live breakdown had no supported recovery, just an undocumented manual
+    workaround.
+
+    Keeps the trip's already-computed route/passengers intact and tries
+    to recover immediately by reusing seal_trip — the exact same
+    vehicle-assignment and notify path a normal seal takes, so a
+    reassignment doesn't get a subtly different implementation. If no
+    vehicle is free right now, run_dispatch_cycle retries this same trip
+    every tick (see below), same as an under-vehicled forming pool.
+    """
+    old_vehicle_id = trip.vehicle_id
+    trip.status = TripStatus.reassigning
+    trip.vehicle_id = None
+    trip.driver_id = None
+    trip.vehicle_label = None
+
+    if old_vehicle_id is not None:
+        old_vehicle = db.get(Vehicle, old_vehicle_id)
+        if old_vehicle is not None:
+            old_vehicle.status = (
+                VehicleStatus.maintenance
+                if reason in DISRUPTION_MEANS_BREAKDOWN
+                else VehicleStatus.available
+            )
+
+    notify_trip_disrupted(db, trip)
+
+    log_event(
+        db,
+        DispatchEventType.driver_rejected,
+        trip_id=trip.id,
+        vehicle_id=old_vehicle_id,
+        actor_user_id=actor_user_id,
+        reason=reason,
+        details={"notes": notes} if notes else None,
+    )
+
+    seal_trip(db, trip, datetime.now(timezone.utc), reason=f"reassigned after: {reason}")
+    return trip
+
+
 def sweep_unmatched_bookings(db: Session) -> int:
     """
     Retries matching for any booking sitting queued with no trip.
@@ -678,6 +764,25 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
     now = now or datetime.now(timezone.utc)
 
     newly_matched = sweep_unmatched_bookings(db)
+
+    # A trip a driver reported disrupted (report_trip_disrupted) that
+    # couldn't find a replacement vehicle immediately stays `reassigning`
+    # with no vehicle — retry it every tick, exactly like an under-
+    # vehicled forming pool below, rather than leaving it stuck until a
+    # dispatcher manually intervenes.
+    stuck_reassigning = (
+        db.execute(
+            select(Trip)
+            .where(Trip.status == TripStatus.reassigning)
+            .where(Trip.vehicle_id.is_(None))
+        )
+        .scalars()
+        .all()
+    )
+    reassigned = 0
+    for trip in stuck_reassigning:
+        if seal_trip(db, trip, now, reason="vehicle freed up after driver-reported issue"):
+            reassigned += 1
 
     trips = (
         db.execute(select(Trip).where(Trip.status == TripStatus.forming))
@@ -742,7 +847,8 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
         "escalated": escalated,
         "merged": merged,
         "blocked_no_vehicle": no_vehicle,
+        "reassigned": reassigned,
     }
-    if newly_matched or sealed or escalated or merged or no_vehicle:
+    if newly_matched or sealed or escalated or merged or no_vehicle or reassigned:
         logger.info("dispatch cycle: %s", summary)
     return summary

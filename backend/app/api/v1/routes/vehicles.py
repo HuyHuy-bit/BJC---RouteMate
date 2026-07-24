@@ -1,10 +1,12 @@
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, status
+from geoalchemy2.elements import WKTElement
 from sqlalchemy.orm import Session
 
 from app.api.deps import require_role
 from app.db.session import get_db
+from app.models.corridor import Corridor
 from app.models.enums import TripStatus, UserRole
 from app.models.trip import Trip
 from app.models.user import User
@@ -47,7 +49,14 @@ def create_vehicle(
             status_code=status.HTTP_409_CONFLICT,
             detail="A vehicle with this plate number already exists",
         )
-    vehicle = Vehicle(**payload.model_dump())
+    data = payload.model_dump()
+    if data.get("home_corridor_id") is None:
+        active_corridors = (
+            db.query(Corridor).filter(Corridor.is_active.is_(True)).all()
+        )
+        if len(active_corridors) == 1:
+            data["home_corridor_id"] = active_corridors[0].id
+    vehicle = Vehicle(**data)
     db.add(vehicle)
     db.commit()
     db.refresh(vehicle)
@@ -66,8 +75,13 @@ def update_vehicle(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found"
         )
-    for field, value in payload.model_dump(exclude_unset=True).items():
+    data = payload.model_dump(exclude_unset=True)
+    lat = data.pop("last_location_lat", None)
+    lng = data.pop("last_location_lng", None)
+    for field, value in data.items():
         setattr(vehicle, field, value)
+    if lat is not None and lng is not None:
+        vehicle.last_location = WKTElement(f"POINT({lng} {lat})", srid=4326)
     db.commit()
     db.refresh(vehicle)
     return vehicle

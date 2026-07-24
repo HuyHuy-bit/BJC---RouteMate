@@ -11,12 +11,25 @@ class VehicleCreate(BaseModel):
     label: str | None = Field(default=None, max_length=50)
     seat_capacity: int = Field(default=MAX_PASSENGERS, ge=1, le=16)
     default_driver_id: uuid.UUID | None = None
+    # If omitted and exactly one corridor is active, the route defaults
+    # it automatically — same "server infers when unambiguous" rule
+    # already used for a booking's direction. Only needs to be picked
+    # explicitly once a second corridor exists.
+    home_corridor_id: uuid.UUID | None = None
 
 
 class VehicleUpdate(BaseModel):
     label: str | None = None
     status: VehicleStatus | None = None
     default_driver_id: uuid.UUID | None = None
+    home_corridor_id: uuid.UUID | None = None
+    # Manual correction for Vehicle.last_location — a dispatcher-facing
+    # override for when the auto-captured point (set on trip completion,
+    # see dispatch.py:update_trip_status) is stale or missing. Handled
+    # specially in the route, not via the generic setattr loop, since
+    # last_location is a PostGIS Geography column, not a plain scalar.
+    last_location_lat: float | None = Field(default=None, ge=-90, le=90)
+    last_location_lng: float | None = Field(default=None, ge=-180, le=180)
 
 
 class VehicleOut(BaseModel):
@@ -26,5 +39,6 @@ class VehicleOut(BaseModel):
     seat_capacity: int
     status: VehicleStatus
     default_driver_id: uuid.UUID | None
+    home_corridor_id: uuid.UUID | None
 
     model_config = {"from_attributes": True}

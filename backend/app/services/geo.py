@@ -29,41 +29,56 @@ class Candidate:
     dropoff_lng: float
 
 
-# Corridor endpoints. This business serves exactly one corridor, which is
-# what makes projection-based direction classification reliable.
-BAC_GIANG_HUB = (21.2731, 106.1946)  # (lat, lng)
-HA_NOI_HUB = (21.0285, 105.8542)
+LatLng = tuple[float, float]
 
 
-def _corridor_position(lat: float, lng: float) -> float:
+def project_onto_corridor(
+    lat: float, lng: float, origin: LatLng, dest: LatLng
+) -> tuple[float, float]:
     """
-    Projects a point onto the Hà Nội -> Bắc Giang corridor line and
-    returns how far along it sits, as a scalar (0.0 ≈ Hà Nội end,
-    1.0 ≈ Bắc Giang end; values outside that range mean the point is
-    beyond an endpoint).
+    Projects a point onto the line from `origin` to `dest` and returns
+    `(t, perpendicular_distance_m)`:
+      - t: how far along the line the point sits, as a scalar
+        (0.0 ≈ origin, 1.0 ≈ dest; values outside that range mean the
+        point is beyond an endpoint).
+      - perpendicular_distance_m: how far off that line the point sits,
+        in meters — near 0 for a point right on the corridor, large for
+        a point nowhere near it.
 
-    Uses an equirectangular approximation, which is accurate at this
-    latitude over ~50km and avoids the distortion of treating raw
-    lat/lng as planar coordinates.
+    Generalized from a version that only ever handled one hard-coded
+    corridor (Hà Nội ↔ Bắc Giang) — this business now serves more than
+    one, so "which two hubs" has to be a parameter, not a module
+    constant. Behavior for that original corridor is unchanged when
+    called with the same two points.
+
+    Uses an equirectangular approximation, which is accurate over
+    distances of a few tens of km (the scale of a single corridor) and
+    avoids the distortion of treating raw lat/lng as planar coordinates.
     """
-    lat_ref = radians((BAC_GIANG_HUB[0] + HA_NOI_HUB[0]) / 2)
+    lat_ref = radians((origin[0] + dest[0]) / 2)
 
     def to_xy(la: float, ln: float) -> tuple[float, float]:
         return (radians(ln) * cos(lat_ref) * EARTH_RADIUS_M,
                 radians(la) * EARTH_RADIUS_M)
 
-    hx, hy = to_xy(*HA_NOI_HUB)
-    bx, by = to_xy(*BAC_GIANG_HUB)
+    ox, oy = to_xy(*origin)
+    dx_, dy_ = to_xy(*dest)
     px, py = to_xy(lat, lng)
 
-    dx, dy = bx - hx, by - hy
+    dx, dy = dx_ - ox, dy_ - oy
     denom = dx * dx + dy * dy
     if denom == 0:
-        return 0.0
-    return ((px - hx) * dx + (py - hy) * dy) / denom
+        return 0.0, haversine_m(lat, lng, origin[0], origin[1])
+
+    t = ((px - ox) * dx + (py - oy) * dy) / denom
+    # Perpendicular offset: distance from the point to its own projection
+    # onto the (infinite) line, via the standard 2D cross-product formula.
+    perp_m = abs((px - ox) * dy - (py - oy) * dx) / sqrt(denom)
+    return t, perp_m
 
 
 def classify_direction(
+    corridor,
     pickup_lat: float,
     pickup_lng: float,
     dropoff_lat: float,
@@ -79,15 +94,18 @@ def classify_direction(
     opposite way. Comparing pickup and dropoff projections is robust
     anywhere on the corridor, including outside the two endpoints.
 
-    Business meaning (this was inverted in an earlier version — a
-    Bắc Giang -> Hà Nội booking was misclassified as "return" and
-    displayed backwards on every screen):
-      outbound = leaving the home base (Bắc Giang -> Hà Nội / away)
-      return   = heading back to the home base (-> Bắc Giang)
-    _corridor_position() returns ~1.0 near Bắc Giang, ~0.0 near Hà Nội.
-    So moving TOWARD Bắc Giang (dropoff projection > pickup projection)
-    is the RETURN leg, not outbound.
+    `corridor` needs `home_hub_lat/lng` (the depot/base end) and
+    `away_hub_lat/lng` (see app/models/corridor.py). Business meaning:
+      outbound = leaving the home base (home -> away)
+      return   = heading back to the home base (away -> home)
+    Projecting from the away hub (t≈0) to the home hub (t≈1), moving
+    TOWARD home (dropoff projection > pickup projection) is the RETURN
+    leg, not outbound — this matches the original single-corridor
+    semantics exactly (an earlier version had this inverted, which
+    displayed every Bắc Giang -> Hà Nội booking backwards).
     """
-    start = _corridor_position(pickup_lat, pickup_lng)
-    end = _corridor_position(dropoff_lat, dropoff_lng)
+    origin = (corridor.away_hub_lat, corridor.away_hub_lng)
+    dest = (corridor.home_hub_lat, corridor.home_hub_lng)
+    start, _ = project_onto_corridor(pickup_lat, pickup_lng, origin, dest)
+    end, _ = project_onto_corridor(dropoff_lat, dropoff_lng, origin, dest)
     return "return" if end >= start else "outbound"

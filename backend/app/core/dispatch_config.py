@@ -55,6 +55,13 @@ WEIGHT_DEADLINE_PRESSURE = 0.10
 # prevents technically-legal but terrible matches.
 MAX_ACCEPTABLE_SCORE = 0.75
 
+# --- Corridor matching ---
+# A booking is only assigned to a corridor if its pickup AND dropoff sit
+# within this far off that corridor's hub-to-hub line. Beyond this, it's
+# not "on" the corridor, it's a different trip entirely — better to
+# reject with a clear "outside service area" than silently guess.
+MAX_CORRIDOR_DEVIATION_METERS = 20_000
+
 # --- Minimum viable pool size, by direction ---
 # Outbound must fill seats to be worth running. Return dispatches solo
 # because the vehicle drives back to base regardless.

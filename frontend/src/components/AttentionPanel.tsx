@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Ban, Car, Users } from "lucide-react";
+import { AlertTriangle, Ban, Car, Users, Wrench } from "lucide-react";
 import { api } from "../lib/api";
 import type { AttentionItem } from "../types";
 import { DIRECTION } from "../lib/format";
@@ -15,6 +15,15 @@ const OPTION_LABEL: Record<string, string> = {
   offer_private_upgrade: "Đề nghị bao xe riêng",
   dispatch_at_loss: "Vẫn cho xe chạy dù chưa đủ khách",
   refund_and_cancel: "Hoàn tiền và huỷ chuyến",
+};
+
+const KIND_BADGE: Record<AttentionItem["kind"], { icon: JSX.Element; label: string }> = {
+  no_vehicle: { icon: <Car size={10} aria-hidden="true" />, label: "Hết xe" },
+  vehicle_down: {
+    icon: <Wrench size={10} aria-hidden="true" />,
+    label: "Xe gặp sự cố",
+  },
+  escalated: { icon: <Users size={10} aria-hidden="true" />, label: "Thiếu khách" },
 };
 
 export default function AttentionPanel() {
@@ -76,15 +85,7 @@ export default function AttentionPanel() {
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap mb-1">
                   <Badge tone="warning">
-                    {item.kind === "no_vehicle" ? (
-                      <>
-                        <Car size={10} aria-hidden="true" /> Hết xe
-                      </>
-                    ) : (
-                      <>
-                        <Users size={10} aria-hidden="true" /> Thiếu khách
-                      </>
-                    )}
+                    {KIND_BADGE[item.kind].icon} {KIND_BADGE[item.kind].label}
                   </Badge>
                   <span className="text-xs text-[var(--text-tertiary)]">
                     {DIRECTION[item.direction].label} · {item.passenger_count} khách

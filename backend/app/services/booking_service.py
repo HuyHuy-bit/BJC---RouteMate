@@ -5,10 +5,20 @@ from sqlalchemy.orm import Session
 from app.core.pricing import price_for
 from app.models.booking import Booking
 from app.models.customer import Customer
-from app.models.enums import BookingDirection
+from app.models.enums import BookingDirection, PaymentStatus
+from app.models.payment import Payment
 from app.schemas.booking import BookingCreate, BookingOut
 from app.schemas.customer import CustomerOut
+from app.schemas.payment import PaymentOut
+from app.services.corridors import find_corridor_for_points
 from app.services.geo import classify_direction
+from app.services.routing import routing_service
+
+
+class OutsideServiceAreaError(Exception):
+    """Raised when a booking's pickup/dropoff don't sit close enough to
+    any active corridor's route to be classified at all — a booking with
+    nowhere to belong, not a guess we should make anyway."""
 
 
 def _point(lat: float, lng: float) -> WKTElement:
@@ -18,6 +28,28 @@ def _point(lat: float, lng: float) -> WKTElement:
 
 
 def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> Booking:
+    corridor = find_corridor_for_points(
+        db,
+        payload.pickup_lat,
+        payload.pickup_lng,
+        payload.dropoff_lat,
+        payload.dropoff_lng,
+    )
+    if corridor is None:
+        raise OutsideServiceAreaError(
+            "pickup/dropoff do not sit on any active corridor"
+        )
+
+    # Real point-to-point distance/duration, computed once up front so
+    # the price quoted at booking time is the final price — it used to
+    # be flat regardless of distance, and computing it later (during
+    # matching) would mean a price that could silently change after the
+    # customer already committed.
+    leg = routing_service.leg(
+        (payload.pickup_lat, payload.pickup_lng),
+        (payload.dropoff_lat, payload.dropoff_lng),
+    )
+
     booking = Booking(
         customer_id=customer.id,
         pickup_address=payload.pickup_address,
@@ -26,7 +58,10 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         dropoff_point=_point(payload.dropoff_lat, payload.dropoff_lng),
         requested_pickup_at=payload.requested_pickup_at,
         is_private=payload.is_private,
-        price_vnd=price_for(payload.is_private),
+        corridor_id=corridor.id,
+        solo_duration_seconds=leg.duration_seconds,
+        solo_distance_meters=leg.distance_meters,
+        price_vnd=price_for(corridor, payload.is_private, leg.distance_meters),
         # Inferred automatically, not customer-supplied — see
         # app/services/geo.py:classify_direction. Direction is decided by
         # which way the passenger moves ALONG the corridor (comparing
@@ -35,6 +70,7 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         # from midpoint towns like Bắc Ninh.
         direction=BookingDirection(
             classify_direction(
+                corridor,
                 payload.pickup_lat,
                 payload.pickup_lng,
                 payload.dropoff_lat,
@@ -43,6 +79,15 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         ),
     )
     db.add(booking)
+    db.flush()
+
+    db.add(
+        Payment(
+            booking_id=booking.id,
+            status=PaymentStatus.pending,
+            expected_amount_vnd=booking.price_vnd,
+        )
+    )
     db.flush()
     return booking
 
@@ -68,6 +113,7 @@ def to_booking_out(booking: Booking) -> BookingOut:
         direction=booking.direction,
         is_private=booking.is_private,
         price_vnd=booking.price_vnd,
+        payment=PaymentOut.model_validate(booking.payment) if booking.payment else None,
         status=booking.status,
         trip_id=booking.trip_id,
         created_at=booking.created_at,
