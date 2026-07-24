@@ -23,5 +23,8 @@ docker-compose.override.yml
 .idea/
 *.swp
 
+# claude code local state (worktrees, local settings)
+.claude/
+
 # os
 .DS_Store
