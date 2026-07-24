@@ -178,8 +178,14 @@ h1, h2, h3, h4 {
     var(--surface-sunken) 75%
   );
   background-size: 200% 100%;
-  animation: shimmer 1.4s infinite linear;
   border-radius: var(--radius-sm);
+  /* Two animations on one element via comma-separated shorthand — combining
+     this with a separate .animate-fade-in class would silently drop one of
+     them, since two classes each setting `animation` on the same element
+     don't stack, the later rule just wins outright. */
+  animation:
+    shimmer 1.4s infinite linear,
+    fade-in 0.25s var(--ease) backwards;
 }
 
 /* ============================================================
