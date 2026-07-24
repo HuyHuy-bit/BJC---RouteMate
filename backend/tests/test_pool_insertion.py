@@ -60,7 +60,7 @@ def _stops(n_riders):
 def test_respects_pickup_before_dropoff_precedence():
     kinds, owners = _stops(3)
     matrix = {(i, j): random.random() for i in range(6) for j in range(6)}
-    _, order = solve_pdp(kinds, owners, lambda i, j: matrix[(i, j)])
+    _, order, _arrivals = solve_pdp(kinds, owners, lambda i, j: matrix[(i, j)])
     seen = set()
     for idx in order:
         if kinds[idx] == "pickup":
@@ -77,7 +77,7 @@ def test_matches_exhaustive_reference_on_random_matrices():
             n = len(kinds)
             matrix = {(i, j): rng.uniform(1, 100) for i in range(n) for j in range(n)}
             cost = lambda i, j: matrix[(i, j)]  # noqa: E731
-            got_cost, _ = solve_pdp(kinds, owners, cost)
+            got_cost, _, _arrivals = solve_pdp(kinds, owners, cost)
             ref_cost, _ = _reference_best(kinds, owners, cost)
             assert abs(got_cost - ref_cost) < 1e-9, (
                 f"{n_riders} riders: solver {got_cost} != reference {ref_cost}"
@@ -103,7 +103,7 @@ def test_finds_interleaved_optimum_not_naive_fifo():
         (3, 0): big, (3, 1): big, (3, 2): big,
     }
     cost = lambda i, j: legs[(i, j)]  # noqa: E731
-    total, order = solve_pdp(kinds, owners, cost)
+    total, order, _arrivals = solve_pdp(kinds, owners, cost)
     # Optimal interleaved route: pA(0) -> pB(2) -> dA(1) -> dB(3)
     assert order == [0, 2, 1, 3]
     assert total == small + small + big  # 1 + 1 + 100 = 102
@@ -133,7 +133,7 @@ def test_optimum_late_in_lexicographic_order_is_still_found():
         legs[(a, b)] = 1.0
     cost = lambda i, j: legs[(i, j)]  # noqa: E731
 
-    total, order = solve_pdp(kinds, owners, cost)
+    total, order, _arrivals = solve_pdp(kinds, owners, cost)
     ref_total, _ = _reference_best(kinds, owners, cost)
     assert abs(total - ref_total) < 1e-9
     assert order == cheap_chain

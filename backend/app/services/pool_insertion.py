@@ -23,6 +23,8 @@ from datetime import datetime, timedelta, timezone
 from uuid import UUID
 
 from app.core.dispatch_config import (
+    EARLY_PICKUP_TOLERANCE_MINUTES,
+    LATE_PICKUP_TOLERANCE_MINUTES,
     MAX_ACCEPTABLE_SCORE,
     MAX_PASSENGER_DETOUR_MINUTES,
     MAX_PASSENGERS,
@@ -136,7 +138,8 @@ def _best_ordering(
     members: list[PoolMember],
     durations: dict[tuple[int, int], float],
     index: dict[tuple[UUID, str], int],
-) -> tuple[float, list[Stop]]:
+    trip_start: datetime | None = None,
+) -> tuple[float, list[Stop], dict[UUID, dict[str, float]]]:
     """
     Exact minimum-duration valid stop ordering for `members`, via the
     shared branch-and-bound PDP solver. Replaces the old
@@ -149,10 +152,29 @@ def _best_ordering(
     coord-position lookup already built by evaluate_insertion — the
     solver's cost callback reads real road-network leg times straight
     out of them.
+
+    When `trip_start` is given, every PICKUP stop is also constrained to
+    land within [requested_pickup_at - EARLY_TOLERANCE, +LATE_TOLERANCE]
+    of that passenger's own request — an ordering that can't satisfy
+    this for every rider is pruned during the search, not accepted and
+    checked afterward. Arriving early doesn't violate anything; it
+    forces a wait, which is folded into the running schedule so it
+    correctly delays every stop visited after it (see solve_pdp).
+    Without `trip_start`, this constraint is skipped entirely — used by
+    _baseline_without's "old pool as it stands" reference, which needs
+    the same schedule model but not a hard gate that could make even
+    the existing membership solve-infeasible mid-computation.
+
+    Returns `(total_duration_seconds, ordered_stops, stop_offsets)` —
+    offsets are the SAME schedule the search used to prune (so any
+    forced wait is already baked in), keyed
+    `booking_id -> {"pickup": seconds, "dropoff": seconds}`. This is the
+    single source of truth for both the detour check and the committed
+    ETAs downstream, so those two can never disagree.
     """
     stops = _stops_of(members)
     if not stops:
-        return 0.0, []
+        return 0.0, [], {}
     kinds = [s.kind for s in stops]
     owners = [s.booking_id for s in stops]
 
@@ -162,32 +184,31 @@ def _best_ordering(
              index[(stops[j].booking_id, stops[j].kind)])
         ]
 
-    total, order = solve_pdp(kinds, owners, cost)
-    return total, [stops[i] for i in order]
+    feasible = None
+    if trip_start is not None:
+        member_by_id = {m.booking_id: m for m in members}
+        early = timedelta(minutes=EARLY_PICKUP_TOLERANCE_MINUTES)
+        late = timedelta(minutes=LATE_PICKUP_TOLERANCE_MINUTES)
 
+        def feasible(stop_index: int, arrival_seconds: float) -> tuple[bool, float]:
+            stop = stops[stop_index]
+            if stop.kind != "pickup":
+                return True, 0.0  # only pickup promises a specific time
+            requested = _as_utc(member_by_id[stop.booking_id].requested_pickup_at)
+            arrival_at = trip_start + timedelta(seconds=arrival_seconds)
+            if arrival_at > requested + late:
+                return False, 0.0  # would arrive too late — reject this route
+            if arrival_at < requested - early:
+                wait = (requested - early - arrival_at).total_seconds()
+                return True, wait  # too early — wait, don't pick up for free
+            return True, 0.0
 
-def stop_schedule(
-    ordered_stops: list[Stop],
-    durations: dict[tuple[int, int], float],
-    index: dict[tuple[UUID, str], int],
-) -> dict[UUID, dict[str, float]]:
-    """
-    Walks an ordered stop list accumulating real leg durations, and
-    returns each booking's pickup/dropoff offset (seconds from route
-    start). The single source of truth for both the detour check and the
-    committed ETAs, so those two can never disagree.
-    """
+    total, order, arrivals = solve_pdp(kinds, owners, cost, feasible)
+    ordered_stops = [stops[i] for i in order]
     offsets: dict[UUID, dict[str, float]] = {}
-    elapsed = 0.0
-    for i, stop in enumerate(ordered_stops):
-        if i > 0:
-            prev = ordered_stops[i - 1]
-            elapsed += durations[
-                (index[(prev.booking_id, prev.kind)],
-                 index[(stop.booking_id, stop.kind)])
-            ]
-        offsets.setdefault(stop.booking_id, {})[stop.kind] = elapsed
-    return offsets
+    for stop, arrival in zip(ordered_stops, arrivals):
+        offsets.setdefault(stop.booking_id, {})[stop.kind] = arrival
+    return total, ordered_stops, offsets
 
 
 def _leg_lookup(coords: list[Coord]) -> dict[tuple[int, int], float]:
@@ -242,17 +263,29 @@ def evaluate_insertion(
 
     durations = _leg_lookup(coords)
 
-    # ---- Stage 3: exact ordering (branch-and-bound, no cap) --------
-    best_total, best_order = _best_ordering(everyone, durations, index)
+    # Anchor for the schedule-window check below — the promise belongs
+    # to whoever in this candidate route has been waiting longest,
+    # same convention used everywhere else a pool's start time matters
+    # (departure_deadline, _write_etas).
+    trip_start = min(_as_utc(m.requested_pickup_at) for m in everyone)
+
+    # ---- Stage 3: exact ordering, pruned by pickup schedule window --
+    best_total, best_order, offsets = _best_ordering(
+        everyone, durations, index, trip_start
+    )
     if not best_order:
-        return InsertionResult(False, "no valid stop ordering found")
+        # Precedence alone (pickup-before-own-dropoff) is always
+        # satisfiable for any non-empty member set — the only thing that
+        # can make every ordering infeasible here is the schedule-window
+        # constraint just applied.
+        return InsertionResult(False, "no ordering satisfies pickup time windows")
 
     # ---- Stage 4: per-passenger service guarantee ------------------
-    # Real per-stop offsets from the chosen route — each passenger's
-    # in-car time (dropoff offset minus pickup offset) is compared to
-    # their own solo baseline. The same offsets are returned below so the
-    # committed ETAs use these exact numbers, not an even split.
-    offsets = stop_schedule(best_order, durations, index)
+    # in-car time (dropoff offset minus pickup offset) compared against
+    # each passenger's own solo baseline. offsets already include any
+    # forced wait from Stage 3, so a wait correctly inflates the in-car
+    # time (and therefore detour) of everyone already aboard when it
+    # happens.
     detours: dict[UUID, float] = {}
     for m in everyone:
         off = offsets[m.booking_id]
@@ -277,7 +310,9 @@ def evaluate_insertion(
     route = routing_service.route([s.coord for s in best_order])
 
     solo_baseline = candidate.solo_duration_seconds
-    added_seconds = max(0.0, best_total - _baseline_without(members, durations, index))
+    added_seconds = max(
+        0.0, best_total - _baseline_without(members, durations, index, trip_start)
+    )
 
     occupancy_after = len(everyone)
     # Prefer nearly-full vehicles: filling one car before opening a second
@@ -332,9 +367,13 @@ def _baseline_without(
     members: list[PoolMember],
     durations: dict[tuple[int, int], float],
     index: dict[tuple[UUID, str], int],
+    trip_start: datetime | None = None,
 ) -> float:
-    """Best route duration for the pool as it stands, before insertion."""
+    """Best route duration for the pool as it stands, before insertion —
+    same trip_start anchor as the main search, so the schedule model
+    (including any forced waits) stays consistent between the two
+    numbers this gets subtracted from/into."""
     if not members:
         return 0.0
-    total, _ = _best_ordering(members, durations, index)
+    total, _order, _offsets = _best_ordering(members, durations, index, trip_start)
     return total

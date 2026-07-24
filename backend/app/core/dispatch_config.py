@@ -26,6 +26,17 @@ PICKUP_WINDOW_MINUTES = 45
 # geographic proximity once one wave has more demand than a single car.
 TIME_CLUSTER_MINUTES = 20
 
+# --- Schedule-window enforcement ---
+# A pickup stop's SCHEDULED arrival — from the real per-leg route walk,
+# not just the raw pairwise "requested times within 45 min" check above —
+# must fall within these tolerances of that passenger's own
+# requested_pickup_at. Deliberately asymmetric: arriving early costs the
+# passenger nothing (the vehicle waits for them rather than picking them
+# up "for free" early — see the forced-wait modeling in
+# pool_insertion.py), arriving late breaks the promise actually made.
+EARLY_PICKUP_TOLERANCE_MINUTES = 5
+LATE_PICKUP_TOLERANCE_MINUTES = 15
+
 # How long a forming pool waits for more passengers before it must decide
 # to depart or escalate.
 MAX_POOL_WAIT_MINUTES = 45

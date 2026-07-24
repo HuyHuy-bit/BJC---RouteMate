@@ -500,10 +500,11 @@ def _write_etas(
 ) -> None:
     """
     Writes firm pickup/dropoff estimates from the route's REAL per-stop
-    offsets (see pool_insertion.stop_schedule), anchored to the earliest
-    requested pickup. Replaces an even-split that gave every passenger
-    the same fabricated dropoff time — numbers find_returning_vehicle
-    then matched return bookings against.
+    offsets (see pool_insertion._best_ordering, which folds any forced
+    early-arrival wait into these same numbers), anchored to the
+    earliest requested pickup. Replaces an even-split that gave every
+    passenger the same fabricated dropoff time — numbers
+    find_returning_vehicle then matched return bookings against.
     """
     if not active:
         return

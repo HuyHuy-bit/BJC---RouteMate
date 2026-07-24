@@ -42,7 +42,8 @@ def solve_pdp(
     kinds: list[str],
     owners: list,
     cost: Callable[[int, int], float],
-) -> tuple[float, list[int]]:
+    feasible: Callable[[int, float], tuple[bool, float]] | None = None,
+) -> tuple[float, list[int], list[float]]:
     """
     Minimum-cost pickup-and-delivery ordering over `len(kinds)` stops, by
     exact constrained backtracking with branch-and-bound pruning.
@@ -52,32 +53,48 @@ def solve_pdp(
     precedes their own dropoff. `cost(i, j)` is the leg cost from stop i
     to stop j — any non-negative metric (distance or duration).
 
-    Returns `(best_total_cost, ordered_stop_indices)`. Because
-    dropoff-before-own-pickup branches are never entered, this only ever
-    generates VALID orderings — so, unlike a raw-permutation search, it
-    can't be truncated by a cap that fires before all valid orderings
-    are seen.
+    `feasible(stop_index, arrival)`, if given, is called before a stop is
+    tentatively visited, with `arrival` = cumulative cost to reach it
+    (before any wait). It returns `(ok, wait)`: `ok=False` prunes that
+    branch entirely (this stop can never be visited at this point in any
+    route built from here); `wait` is additional time forced onto the
+    schedule at that stop (e.g. the vehicle arrived early and must wait)
+    — it's added to the running total and so correctly carries forward
+    into every later stop's arrival time, exactly like a real delay
+    would. Passing `feasible=None` recovers the original unconstrained
+    search.
+
+    Returns `(best_total_cost, ordered_stop_indices, arrival_at_each)` —
+    the third list is the actual schedule (cumulative cost, including any
+    forced waits) at each stop in `ordered_stop_indices`, positionally
+    aligned with it. Because dropoff-before-own-pickup branches are never
+    entered, this only ever generates VALID orderings — so, unlike a
+    raw-permutation search, it can't be truncated by a cap that fires
+    before all valid orderings are seen.
     """
     n = len(kinds)
     if n == 0:
-        return 0.0, []
+        return 0.0, [], []
 
     used = [False] * n
     picked: set = set()
     seq: list[int] = []
+    arrivals: list[float] = []
     best_cost = float("inf")
     best_order: list[int] = []
+    best_arrivals: list[float] = []
 
     def backtrack(running: float) -> None:
-        nonlocal best_cost, best_order
-        # Branch-and-bound: every remaining leg is non-negative, so a
-        # partial route already at or above the best complete route
-        # found so far can never beat it — abandon it now.
+        nonlocal best_cost, best_order, best_arrivals
+        # Branch-and-bound: every remaining leg (and any forced wait) is
+        # non-negative, so a partial route already at or above the best
+        # complete route found so far can never beat it — abandon it now.
         if running >= best_cost:
             return
         if len(seq) == n:
             best_cost = running
             best_order = list(seq)
+            best_arrivals = list(arrivals)
             return
         for i in range(n):
             if used[i]:
@@ -85,19 +102,27 @@ def solve_pdp(
             if kinds[i] == "dropoff" and owners[i] not in picked:
                 continue  # can't drop off before that rider's pickup
             step = 0.0 if not seq else cost(seq[-1], i)
+            arrival = running + step
+            wait = 0.0
+            if feasible is not None:
+                ok, wait = feasible(i, arrival)
+                if not ok:
+                    continue  # this stop can't be scheduled here — prune
             used[i] = True
             is_pickup = kinds[i] == "pickup"
             if is_pickup:
                 picked.add(owners[i])
             seq.append(i)
-            backtrack(running + step)
+            arrivals.append(arrival + wait)
+            backtrack(arrival + wait)
+            arrivals.pop()
             seq.pop()
             if is_pickup:
                 picked.discard(owners[i])
             used[i] = False
 
     backtrack(0.0)
-    return best_cost, best_order
+    return best_cost, best_order, best_arrivals
 
 
 def _stops_for(members: list[Candidate]) -> list[Stop]:
@@ -134,7 +159,7 @@ def best_route(members: list[Candidate]) -> tuple[float, list[Stop]]:
     def cost(i: int, j: int) -> float:
         return haversine_m(stops[i].lat, stops[i].lng, stops[j].lat, stops[j].lng)
 
-    total, order = solve_pdp(kinds, owners, cost)
+    total, order, _arrivals = solve_pdp(kinds, owners, cost)
     return total, [stops[i] for i in order]
 
 
