@@ -1,5 +1,5 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowDownToLine, ArrowUpFromLine, Car, Phone } from "lucide-react";
+import { ArrowDownToLine, ArrowUpFromLine, Car, Phone, UserX } from "lucide-react";
 import { api } from "../lib/api";
 import type { TripOut, TripStatus } from "../types";
 import AppShell from "../components/layout/AppShell";
@@ -36,6 +36,16 @@ export default function DriverDashboard() {
       refresh();
     } catch (err: any) {
       toast(getErrorMessage(err, "Không cập nhật được chuyến."), "error");
+    }
+  };
+
+  const markNoShow = async (bookingId: string, customerName: string) => {
+    try {
+      await api.bookings.noShow(bookingId);
+      toast(`Đã đánh dấu ${customerName} không đến.`, "success");
+      refresh();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không cập nhật được."), "error");
     }
   };
 
@@ -141,6 +151,16 @@ export default function DriverDashboard() {
                         <p className="text-[11px] text-[var(--text-tertiary)] mt-1.5 tnum">
                           Đón lúc {fmtTime(b.requested_pickup_at)}
                         </p>
+
+                        {trip.status === "in_progress" && (
+                          <button
+                            onClick={() => markNoShow(b.id, b.customer.full_name)}
+                            className="mt-2 inline-flex items-center gap-1 text-xs text-[var(--danger)] hover:underline"
+                          >
+                            <UserX size={12} aria-hidden="true" />
+                            Khách không đến
+                          </button>
+                        )}
                       </div>
                     </div>
                   </li>

@@ -10,6 +10,7 @@ from app.models.enums import (  # noqa: F401
     UserRole,
     VehicleStatus,
 )
+from app.models.notification import Notification  # noqa: F401
 from app.models.trip import Trip  # noqa: F401
 from app.models.user import User  # noqa: F401
 from app.models.vehicle import Vehicle  # noqa: F401

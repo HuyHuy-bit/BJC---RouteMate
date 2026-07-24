@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Car, Lock, UserRound, Users } from "lucide-react";
+import { useState } from "react";
+import { Car, Lock, UserRound, Users, Zap, GitMerge } from "lucide-react";
 import { api } from "../lib/api";
 import type { TripOut, TripStatus } from "../types";
 import { DIRECTION, NEXT_TRIP_ACTION, TRIP_STATUS, fmtVnd } from "../lib/format";
@@ -26,7 +27,11 @@ export default function TripsPanel({
     queryFn: () => api.users.list("driver"),
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["trips"] });
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["trips"] });
+    queryClient.invalidateQueries({ queryKey: ["attention"] });
+    queryClient.invalidateQueries({ queryKey: ["bookings"] });
+  };
 
   const handleAssign = async (trip: TripOut, driverId: string) => {
     if (!driverId) return;
@@ -47,6 +52,26 @@ export default function TripsPanel({
       refresh();
     } catch (err: any) {
       toast(getErrorMessage(err, "Không cập nhật được chuyến."), "error");
+    }
+  };
+
+  const handleForceSeal = async (trip: TripOut) => {
+    try {
+      await api.dispatch.sealTrip(trip.id);
+      toast("Đã chốt chuyến.", "success");
+      refresh();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không chốt được chuyến."), "error");
+    }
+  };
+
+  const handleMerge = async (sourceId: string, targetId: string) => {
+    try {
+      await api.dispatch.mergeTrips(sourceId, targetId);
+      toast("Đã gộp hai chuyến.", "success");
+      refresh();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không gộp được chuyến."), "error");
     }
   };
 
@@ -75,6 +100,17 @@ export default function TripsPanel({
         const action = NEXT_TRIP_ACTION[trip.status];
         const revenue = trip.bookings.reduce((s, b) => s + b.price_vnd, 0);
         const direction = trip.bookings[0]?.direction;
+        const isForming = trip.status === "forming";
+
+        // Other forming pools going the same way — merge candidates.
+        const mergeCandidates = isForming
+          ? trips.filter(
+              (t) =>
+                t.id !== trip.id &&
+                t.status === "forming" &&
+                t.bookings[0]?.direction === direction
+            )
+          : [];
 
         return (
           <Card
@@ -126,24 +162,68 @@ export default function TripsPanel({
             </ol>
 
             <div className="space-y-2 pt-3 border-t border-[var(--border)]">
-              <label className="block">
-                <span className="sr-only">Tài xế cho xe {idx + 1}</span>
-                <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] mb-1">
-                  <UserRound size={11} aria-hidden="true" /> Tài xế
-                </div>
-                <select
-                  value={trip.driver_id ?? ""}
-                  onChange={(e) => handleAssign(trip, e.target.value)}
-                  className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
-                >
-                  <option value="">Chưa giao</option>
-                  {driversQuery.data?.map((d) => (
-                    <option key={d.id} value={d.id}>
-                      {d.full_name}
-                    </option>
-                  ))}
-                </select>
-              </label>
+              {!isForming && (
+                <label className="block">
+                  <span className="sr-only">Tài xế cho xe {idx + 1}</span>
+                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] mb-1">
+                    <UserRound size={11} aria-hidden="true" /> Tài xế
+                  </div>
+                  <select
+                    value={trip.driver_id ?? ""}
+                    onChange={(e) => handleAssign(trip, e.target.value)}
+                    className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                  >
+                    <option value="">Chưa giao</option>
+                    {driversQuery.data?.map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.full_name}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+              )}
+
+              {isForming && (
+                <>
+                  {/* Manual overrides — the algorithm doesn't get every
+                      case right, and a dispatcher who can't intervene
+                      will stop trusting it. */}
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    fullWidth
+                    iconLeft={<Zap size={13} aria-hidden="true" />}
+                    onClick={() => handleForceSeal(trip)}
+                  >
+                    Chốt ngay
+                  </Button>
+
+                  {mergeCandidates.length > 0 && (
+                    <label className="block">
+                      <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] mb-1">
+                        <GitMerge size={11} aria-hidden="true" /> Gộp với xe khác
+                      </span>
+                      <select
+                        value=""
+                        onChange={(e) => {
+                          if (e.target.value) handleMerge(trip.id, e.target.value);
+                        }}
+                        className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
+                      >
+                        <option value="">Chọn xe để gộp...</option>
+                        {mergeCandidates.map((t) => {
+                          const tIdx = trips.findIndex((x) => x.id === t.id);
+                          return (
+                            <option key={t.id} value={t.id}>
+                              Xe {tIdx + 1} ({t.bookings.length} khách)
+                            </option>
+                          );
+                        })}
+                      </select>
+                    </label>
+                  )}
+                </>
+              )}
 
               {action && (
                 <Button

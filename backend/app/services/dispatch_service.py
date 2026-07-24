@@ -47,6 +47,7 @@ from app.services.pool_insertion import (
     evaluate_insertion,
 )
 from app.services.routing import routing_service
+from app.services.notification_service import notify_trip_sealed
 
 logger = logging.getLogger(__name__)
 
@@ -378,7 +379,7 @@ def assign_booking(db: Session, booking: Booking) -> Trip:
     return trip
 
 
-def _pool_snapshot(trip: Trip) -> PoolSnapshot:
+def pool_snapshot(trip: Trip) -> PoolSnapshot:
     active = [
         b
         for b in trip.bookings
@@ -472,19 +473,218 @@ def _apply_etas(trip: Trip) -> None:
         )
 
 
+def release_vehicle_if_free(db: Session, trip: Trip) -> None:
+    """
+    Frees a trip's vehicle back to `available` — but only if that vehicle
+    isn't also committed to some OTHER still-active trip. Shared by trip
+    completion/cancellation and by detach/no-show handling, so a vehicle
+    can never get stuck permanently marked on_trip after it's actually
+    done driving.
+    """
+    if trip.vehicle_id is None:
+        return
+    still_committed = (
+        db.query(Trip)
+        .filter(Trip.vehicle_id == trip.vehicle_id)
+        .filter(Trip.id != trip.id)
+        .filter(
+            Trip.status.in_(
+                [
+                    TripStatus.sealed,
+                    TripStatus.assigned,
+                    TripStatus.in_progress,
+                    TripStatus.reassigning,
+                ]
+            )
+        )
+        .first()
+    )
+    if still_committed is None:
+        vehicle = db.get(Vehicle, trip.vehicle_id)
+        if vehicle is not None and vehicle.status == VehicleStatus.on_trip:
+            vehicle.status = VehicleStatus.available
+
+
+def detach_booking_from_trip(
+    db: Session,
+    booking: Booking,
+    new_status: BookingStatus,
+    reason: str,
+    actor_user_id: UUID | None = None,
+) -> None:
+    """
+    Handles both cancellation and no-show — the two events a naive
+    "just flip the status" implementation gets wrong. A booking leaving a
+    trip mid-formation, or mid-route, has real consequences for everyone
+    still in that car:
+
+      - if it was the trip's only passenger, the trip and its vehicle
+        reservation are released, not left dangling
+      - if others remain, their route is re-optimized (stop order, ETAs)
+        rather than driving to a stop that's no longer needed
+    """
+    old_trip = booking.trip
+    booking.status = new_status
+    booking.stop_order = None
+
+    if old_trip is None:
+        return
+
+    remaining = [
+        b
+        for b in old_trip.bookings
+        if b.id != booking.id
+        and b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+    ]
+
+    if not remaining:
+        old_trip.status = TripStatus.cancelled
+        release_vehicle_if_free(db, old_trip)
+        log_event(
+            db,
+            DispatchEventType.trip_cancelled,
+            trip_id=old_trip.id,
+            booking_id=booking.id,
+            actor_user_id=actor_user_id,
+            reason=f"{reason} — last passenger removed, trip dissolved",
+        )
+        return
+
+    _refresh_pool_geometry(db, old_trip)
+    if old_trip.status in (TripStatus.assigned, TripStatus.in_progress):
+        _apply_etas(old_trip)
+
+    log_event(
+        db,
+        DispatchEventType.booking_removed,
+        trip_id=old_trip.id,
+        booking_id=booking.id,
+        actor_user_id=actor_user_id,
+        reason=reason,
+        details={"remaining_passengers": len(remaining)},
+    )
+
+
+def seal_trip(
+    db: Session, trip: Trip, now: datetime, reason: str
+) -> Vehicle | None:
+    """
+    The actual seal action — commit a vehicle, lock the route, notify
+    riders. Shared by the automatic dispatch cycle and the manual
+    force-seal override, so both paths behave identically instead of
+    the override being a second, subtly different implementation.
+    """
+    vehicle = _assign_vehicle(db, trip)
+    if vehicle is None:
+        log_event(
+            db,
+            DispatchEventType.pool_sealed,
+            trip_id=trip.id,
+            reason="ready to seal but no vehicle available",
+        )
+        return None
+
+    trip.status = TripStatus.assigned
+    trip.sealed_at = now
+    _refresh_pool_geometry(db, trip)
+    _apply_etas(trip)
+    for b in trip.bookings:
+        if b.status == BookingStatus.matched:
+            b.status = BookingStatus.locked
+
+    notify_trip_sealed(db, trip)
+
+    log_event(
+        db,
+        DispatchEventType.pool_sealed,
+        trip_id=trip.id,
+        vehicle_id=vehicle.id,
+        reason=reason,
+        details={"passengers": len(trip.bookings)},
+    )
+    return vehicle
+
+
+def merge_trips(
+    db: Session,
+    source: Trip,
+    target: Trip,
+    reason: str,
+    actor_user_id: UUID | None = None,
+) -> None:
+    """Moves every active booking from `source` into `target`, dissolving
+    `source`. Shared by automatic escalation-merge and the manual
+    dispatcher override."""
+    for b in list(source.bookings):
+        if b.status not in (BookingStatus.cancelled, BookingStatus.no_show):
+            b.trip_id = target.id
+    source.status = TripStatus.cancelled
+    db.flush()
+    _refresh_pool_geometry(db, target)
+    log_event(
+        db,
+        DispatchEventType.pool_merged,
+        trip_id=target.id,
+        actor_user_id=actor_user_id,
+        reason=reason,
+        details={"absorbed_pool": str(source.id)},
+    )
+
+
+def sweep_unmatched_bookings(db: Session) -> int:
+    """
+    Retries matching for any booking sitting queued with no trip.
+
+    Without this, the ONLY moment a booking ever gets matched is at
+    creation (see bookings.py's create route). If that initial match
+    attempt failed — a routing hiccup, or simply no pool existed yet at
+    that exact second — the booking would sit invisible forever, since
+    the dispatch cycle previously only ever looked at pools that already
+    existed. This closes that gap and is also what makes the manual
+    "unassign" override actually useful: a booking sent back to `queued`
+    needs somewhere that will pick it up again.
+    """
+    orphaned = (
+        db.execute(
+            select(Booking)
+            .where(Booking.status == BookingStatus.queued)
+            .where(Booking.trip_id.is_(None))
+        )
+        .scalars()
+        .all()
+    )
+    matched = 0
+    for booking in orphaned:
+        try:
+            assign_booking(db, booking)
+            matched += 1
+        except Exception:
+            logger.exception(
+                "sweep: matching failed for booking %s; will retry next cycle",
+                booking.id,
+            )
+            db.rollback()
+    return matched
+
+
 def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
     """
-    One automated pass over every forming pool. This is what removes the
-    human from the loop: previously nothing was ever dispatched unless
-    someone clicked a button.
+    One automated pass: first retry any unmatched booking, then evaluate
+    every forming pool for seal/escalate/merge. This is what removes the
+    human from the loop — previously nothing was ever dispatched unless
+    someone clicked a button, and unmatched bookings had no path back
+    into the system at all.
     """
     now = now or datetime.now(timezone.utc)
+
+    newly_matched = sweep_unmatched_bookings(db)
+
     trips = (
         db.execute(select(Trip).where(Trip.status == TripStatus.forming))
         .scalars()
         .all()
     )
-    snapshots = {t.id: _pool_snapshot(t) for t in trips}
+    snapshots = {t.id: pool_snapshot(t) for t in trips}
 
     sealed = escalated = merged = 0
     no_vehicle = 0
@@ -500,9 +700,6 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
             continue
 
         if decision.decision is SealDecision.ESCALATE:
-            # Before stranding anyone, try merging with another
-            # under-filled pool going the same way — that serves both
-            # sets of customers AND removes a vehicle from the road.
             others = [
                 s
                 for tid, s in snapshots.items()
@@ -511,21 +708,11 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
             partner = find_merge_candidate(snap, others)
             if partner is not None:
                 partner_trip = next(t for t in trips if t.id == partner.pool_id)
-                for b in list(trip.bookings):
-                    if b.status not in (
-                        BookingStatus.cancelled,
-                        BookingStatus.no_show,
-                    ):
-                        b.trip_id = partner_trip.id
-                trip.status = TripStatus.cancelled
-                db.flush()
-                _refresh_pool_geometry(db, partner_trip)
-                log_event(
+                merge_trips(
                     db,
-                    DispatchEventType.pool_merged,
-                    trip_id=partner_trip.id,
+                    trip,
+                    partner_trip,
                     reason=f"merged under-filled pool {trip.id} at deadline",
-                    details={"absorbed_pool": str(trip.id)},
                 )
                 merged += 1
                 continue
@@ -541,45 +728,21 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
             continue
 
         # SEAL
-        vehicle = _assign_vehicle(db, trip)
+        vehicle = seal_trip(db, trip, now, decision.reason)
         if vehicle is None:
-            # Fleet fully committed. Leave forming and surface it rather
-            # than promising a ride that cannot run.
-            log_event(
-                db,
-                DispatchEventType.pool_sealed,
-                trip_id=trip.id,
-                reason="ready to seal but no vehicle available",
-            )
             no_vehicle += 1
-            continue
-
-        trip.status = TripStatus.assigned
-        trip.sealed_at = now
-        _refresh_pool_geometry(db, trip)
-        _apply_etas(trip)
-        for b in trip.bookings:
-            if b.status == BookingStatus.matched:
-                b.status = BookingStatus.locked
-
-        log_event(
-            db,
-            DispatchEventType.pool_sealed,
-            trip_id=trip.id,
-            vehicle_id=vehicle.id,
-            reason=decision.reason,
-            details={"passengers": snap.passenger_count},
-        )
-        sealed += 1
+        else:
+            sealed += 1
 
     db.commit()
     summary = {
+        "newly_matched": newly_matched,
         "pools_examined": len(trips),
         "sealed": sealed,
         "escalated": escalated,
         "merged": merged,
         "blocked_no_vehicle": no_vehicle,
     }
-    if sealed or escalated or merged or no_vehicle:
+    if newly_matched or sealed or escalated or merged or no_vehicle:
         logger.info("dispatch cycle: %s", summary)
     return summary

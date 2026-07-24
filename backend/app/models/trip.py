@@ -75,4 +75,14 @@ class Trip(Base, TimestampMixin):
     # are softer than usual.
     route_is_estimate: Mapped[bool | None] = mapped_column(nullable=True)
 
+    # When this trip actually finished (or was cancelled) — not inferred
+    # from updated_at, which drifts if anything else touches the row
+    # afterward. This is what the ride-history view is built on.
+    completed_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, index=True
+    )
+    cancelled_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+
     bookings: Mapped[list["Booking"]] = relationship(back_populates="trip")

@@ -10,6 +10,8 @@ const DispatchBoard = lazy(() => import("./pages/DispatchBoard"));
 const DriverDashboard = lazy(() => import("./pages/DriverDashboard"));
 const CreateUserPage = lazy(() => import("./pages/CreateUserPage"));
 const FleetPage = lazy(() => import("./pages/FleetPage"));
+const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
+const HistoryPage = lazy(() => import("./pages/HistoryPage"));
 
 function FullPageLoader() {
   return (
@@ -73,6 +75,22 @@ export default function App() {
           element={
             <ProtectedRoute allow={["admin", "dispatcher"]}>
               <FleetPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/notifications"
+          element={
+            <ProtectedRoute allow={["admin", "dispatcher"]}>
+              <NotificationsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/history"
+          element={
+            <ProtectedRoute allow={["admin", "dispatcher", "driver"]}>
+              <HistoryPage />
             </ProtectedRoute>
           }
         />

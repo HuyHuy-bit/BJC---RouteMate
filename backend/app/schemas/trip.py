@@ -15,6 +15,8 @@ class TripOut(BaseModel):
     is_private: bool
     bookings: list[BookingOut]
     created_at: datetime
+    completed_at: datetime | None = None
+    cancelled_at: datetime | None = None
 
 
 class MatchingRunResult(BaseModel):
@@ -28,3 +30,26 @@ class TripAssignDriver(BaseModel):
 
 class TripStatusUpdate(BaseModel):
     status: TripStatus
+
+
+class AttentionItem(BaseModel):
+    """
+    A forming pool that needs a human decision right now — either it
+    couldn't fill by deadline (escalated) or the fleet is fully
+    committed (no_vehicle). Previously these were only ever written to
+    the dispatch_events audit log; nothing ever surfaced them to a
+    dispatcher.
+    """
+
+    kind: str  # "escalated" | "no_vehicle"
+    trip_id: uuid.UUID
+    direction: str
+    passenger_count: int
+    minutes_overdue: float
+    reason: str
+    options: list[str] | None
+    bookings: list[BookingOut]
+
+
+class MergeTripsResult(BaseModel):
+    target: TripOut

@@ -1,9 +1,11 @@
 import { useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Plus, Shuffle } from "lucide-react";
+import { Link } from "react-router-dom";
+import { Bell, Plus, Shuffle } from "lucide-react";
 import { api } from "../lib/api";
 import type { BookingStatus } from "../types";
 import AppShell from "../components/layout/AppShell";
+import AttentionPanel from "../components/AttentionPanel";
 import BookingForm from "../components/BookingForm";
 import BookingsList from "../components/BookingsList";
 import TripsPanel from "../components/TripsPanel";
@@ -94,6 +96,11 @@ export default function DispatchBoard() {
       subtitle="Bắc Giang ⇄ Hà Nội"
       actions={
         <>
+          <Link to="/notifications">
+            <Button variant="ghost" iconLeft={<Bell size={15} aria-hidden="true" />}>
+              Thông báo
+            </Button>
+          </Link>
           <Button
             variant="secondary"
             iconLeft={<Plus size={15} aria-hidden="true" />}
@@ -121,6 +128,8 @@ export default function DispatchBoard() {
         <Stat label="Xe đang chạy" value={stats.cars} />
         <Stat label="Doanh thu dự kiến" value={fmtVnd(stats.revenue)} />
       </div>
+
+      <AttentionPanel />
 
       <div className="grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] gap-5 items-start">
         {/* Queue */}

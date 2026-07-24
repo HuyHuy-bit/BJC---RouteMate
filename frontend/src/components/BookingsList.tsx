@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Inbox, Lock, Trash2 } from "lucide-react";
+import { ArrowRight, Inbox, Lock, Trash2, Undo2 } from "lucide-react";
 import type { BookingOut } from "../types";
 import { api } from "../lib/api";
 import { BOOKING_STATUS, DIRECTION, fmtDayLabel, fmtTime, fmtVnd } from "../lib/format";
@@ -9,6 +9,7 @@ import ConfirmDialog from "./ui/ConfirmDialog";
 import EmptyState from "./ui/EmptyState";
 import Skeleton from "./ui/Skeleton";
 import { useToast } from "./ui/Toast";
+import { getErrorMessage } from "../lib/errors";
 
 export default function BookingsList({
   bookings,
@@ -24,6 +25,7 @@ export default function BookingsList({
   const toast = useToast();
   const [pendingDelete, setPendingDelete] = useState<BookingOut | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [unassigning, setUnassigning] = useState<string | null>(null);
 
   const confirmDelete = async () => {
     if (!pendingDelete) return;
@@ -37,6 +39,19 @@ export default function BookingsList({
       toast("Không xoá được khách hàng. Thử lại.", "error");
     } finally {
       setDeleting(false);
+    }
+  };
+
+  const handleUnassign = async (b: BookingOut) => {
+    setUnassigning(b.id);
+    try {
+      await api.bookings.unassign(b.id);
+      toast(`Đã đưa ${b.customer.full_name} về hàng chờ.`, "success");
+      onChanged();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không bỏ được khách khỏi chuyến."), "error");
+    } finally {
+      setUnassigning(null);
     }
   };
 
@@ -68,6 +83,12 @@ export default function BookingsList({
       <ul className="divide-y divide-[var(--border)]">
         {bookings.map((b) => {
           const status = BOOKING_STATUS[b.status];
+          // Only a booking still sitting in a FORMING pool makes sense to
+          // pull back out manually — once a trip is sealed/assigned the
+          // route and vehicle are already committed, so unassigning would
+          // just orphan a locked trip instead of freeing anything useful.
+          const canUnassign = b.trip_id !== null && b.status === "matched";
+
           return (
             <li
               key={b.id}
@@ -107,10 +128,25 @@ export default function BookingsList({
                 </p>
               </div>
 
-              <div className="flex items-center gap-2 shrink-0">
-                <span className="text-sm font-medium tnum text-[var(--text)]">
+              <div className="flex items-center gap-1 shrink-0">
+                <span className="text-sm font-medium tnum text-[var(--text)] mr-1">
                   {fmtVnd(b.price_vnd)}
                 </span>
+
+                {canUnassign && (
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => handleUnassign(b)}
+                    loading={unassigning === b.id}
+                    aria-label={`Bỏ ${b.customer.full_name} khỏi chuyến`}
+                    title="Đưa về hàng chờ để ghép lại"
+                    className="!px-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  >
+                    <Undo2 size={14} aria-hidden="true" />
+                  </Button>
+                )}
+
                 <Button
                   variant="danger-subtle"
                   size="sm"

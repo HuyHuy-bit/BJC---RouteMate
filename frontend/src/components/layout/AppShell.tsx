@@ -1,6 +1,6 @@
 import { type ReactNode } from "react";
 import { Link } from "react-router-dom";
-import { Car, LogOut, UserPlus } from "lucide-react";
+import { Car, History, LogOut, UserPlus } from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import Button from "../ui/Button";
 
@@ -56,6 +56,20 @@ export default function AppShell({
             </Link>
 
             <div className="flex items-center gap-2 shrink-0">
+              {/* Visible to every role — admin, dispatcher, and driver
+                  all asked to see past rides, unlike the fleet/staff
+                  links which are staff-only. */}
+              <Link to="/history" aria-label="Lịch sử chuyến">
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  iconLeft={<History size={14} aria-hidden="true" />}
+                  className="!px-2 sm:!px-2.5"
+                >
+                  <span className="hidden sm:inline">Lịch sử</span>
+                </Button>
+              </Link>
+
               {(user?.role === "admin" || user?.role === "dispatcher") && (
                 <Link to="/fleet" aria-label="Đội xe">
                   <Button

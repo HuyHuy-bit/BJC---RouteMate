@@ -87,6 +87,8 @@ export interface TripOut {
   is_private: boolean;
   bookings: BookingOut[];
   created_at: string;
+  completed_at: string | null;
+  cancelled_at: string | null;
 }
 
 export interface MatchingRunResult {
@@ -126,4 +128,30 @@ export interface VehicleUpdate {
   label?: string | null;
   status?: VehicleStatus;
   default_driver_id?: string | null;
+}
+
+export interface AttentionItem {
+  kind: "escalated" | "no_vehicle";
+  trip_id: string;
+  direction: BookingDirection;
+  passenger_count: number;
+  minutes_overdue: number;
+  reason: string;
+  options: string[] | null;
+  bookings: BookingOut[];
+}
+
+export interface MergeTripsResult {
+  target: TripOut;
+}
+
+export interface NotificationOut {
+  id: string;
+  booking_id: string;
+  customer_name: string;
+  customer_phone: string;
+  event: string;
+  message: string;
+  status: string;
+  created_at: string;
 }

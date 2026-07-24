@@ -12,6 +12,7 @@ from app.api.v1.routes import (
     dispatch,
     geocode,
     health,
+    notifications,
     users,
     vehicles,
 )
@@ -23,15 +24,13 @@ logging.basicConfig(level=logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    # Uvicorn --reload spawns a reloader parent plus a worker; starting
-    # the scheduler in both would double-dispatch every pool.
     if os.getenv("DISABLE_SCHEDULER", "").lower() not in ("1", "true", "yes"):
         start_scheduler()
     yield
     shutdown_scheduler()
 
 
-app = FastAPI(title="Xe Ghép Dispatch API", version="0.2.0", lifespan=lifespan)
+app = FastAPI(title="Xe Ghép Dispatch API", version="0.3.0", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
@@ -49,3 +48,4 @@ app.include_router(customers.router, prefix="/api/v1/customers")
 app.include_router(bookings.router, prefix="/api/v1/bookings")
 app.include_router(dispatch.router, prefix="/api/v1/dispatch")
 app.include_router(geocode.router, prefix="/api/v1/geocode")
+app.include_router(notifications.router, prefix="/api/v1/notifications")
