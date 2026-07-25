@@ -12,6 +12,8 @@ import FleetStatusTable from "../components/FleetStatusTable";
 import TripsPanel from "../components/TripsPanel";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
+import QueryState from "../components/ui/QueryState";
+import Skeleton from "../components/ui/Skeleton";
 import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
 import { fmtVnd } from "../lib/format";
@@ -70,13 +72,23 @@ export default function DispatchBoard() {
       waiting: bookings.filter((b) => b.status === "queued" || b.status === "waiting")
         .length,
       matched: bookings.filter((b) => b.status === "matched").length,
-      cars: trips.length,
+      // Cars physically on the road — status `in_progress` and nothing
+      // else. This used to be `trips.length`, which counted every pool
+      // including ones still gathering passengers, so the tile read
+      // "Xe đang chạy: 7" directly above a fleet table that said 2 were
+      // running. Two different numbers under the same word, 200px
+      // apart, is how an operator learns to distrust a dashboard.
+      running: trips.filter((t) => t.status === "in_progress").length,
       revenue: trips.reduce(
         (sum, t) => sum + t.bookings.reduce((s, b) => s + b.price_vnd, 0),
         0
       ),
     };
   }, [bookings, trips]);
+
+  // Both queries feed the tiles, so either failing makes all four
+  // numbers untrustworthy.
+  const statsReady = !bookingsQuery.isError && !tripsQuery.isError;
 
   const visibleBookings = useMemo(
     () => (filter === "all" ? bookings : bookings.filter((b) => b.status === filter)),
@@ -132,12 +144,27 @@ export default function DispatchBoard() {
     >
       {/* Stats — the operational picture, above everything else.
           Previously the form occupied this space and pushed the actual
-          state of the business below the fold. */}
+          state of the business below the fold.
+
+          When a query has failed these show "—" rather than 0. A
+          confident zero is a lie about the state of the business, and
+          it is exactly the kind of lie a dispatcher would act on. */}
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
-        <Stat label="Khách chờ ghép" value={stats.waiting} tone="warning" />
-        <Stat label="Khách đã ghép" value={stats.matched} tone="success" />
-        <Stat label="Xe đang chạy" value={stats.cars} />
-        <Stat label="Doanh thu dự kiến" value={fmtVnd(stats.revenue)} />
+        <Stat
+          label="Khách chờ ghép"
+          value={statsReady ? stats.waiting : "—"}
+          tone="warning"
+        />
+        <Stat
+          label="Khách đã ghép"
+          value={statsReady ? stats.matched : "—"}
+          tone="success"
+        />
+        <Stat label="Xe đang chạy" value={statsReady ? stats.running : "—"} />
+        <Stat
+          label="Doanh thu dự kiến"
+          value={statsReady ? fmtVnd(stats.revenue) : "—"}
+        />
       </div>
 
       <AttentionPanel />
@@ -146,23 +173,33 @@ export default function DispatchBoard() {
           "at Bắc Giang / at Hà Nội / running" picture, above the
           per-pool detail below. */}
       <div className="mb-6">
-        <FleetStatusTable trips={trips} loading={tripsQuery.isLoading} />
+        <QueryState
+          query={tripsQuery}
+          errorTitle="Không tải được tình trạng đội xe"
+          skeleton={<Skeleton className="h-56 w-full rounded-lg" />}
+        >
+          {(tripList) => <FleetStatusTable trips={tripList} />}
+        </QueryState>
       </div>
 
-      <div className="grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] gap-5 items-start">
+      {/* Tablet gets its own two-column tier at `md` rather than
+          falling back to the phone layout, which stacked the queue
+          above the cars and made the board a very long scroll on the
+          device dispatchers actually keep on the desk. */}
+      <div className="grid md:grid-cols-2 lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] gap-5 items-start">
         {/* Queue */}
         <Card className="overflow-hidden">
-          <div className="px-4 py-3 border-b border-[var(--border)] flex items-center justify-between gap-2">
-            <h2 className="text-sm font-semibold">
+          <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-2">
+            <h2 className="text-base font-semibold">
               Hàng chờ
-              <span className="text-[var(--text-tertiary)] font-normal ml-1.5 tnum">
+              <span className="text-faint font-normal ml-1.5 tnum">
                 {visibleBookings.length}
               </span>
             </h2>
           </div>
 
           <div
-            className="flex gap-1 px-3 py-2 border-b border-[var(--border)] overflow-x-auto"
+            className="flex gap-1 px-3 py-2 border-b border-line overflow-x-auto"
             role="tablist"
             aria-label="Lọc theo trạng thái"
           >
@@ -173,10 +210,10 @@ export default function DispatchBoard() {
                 aria-selected={filter === f.value}
                 onClick={() => setFilter(f.value)}
                 className={[
-                  "px-2.5 h-7 rounded-[var(--radius-full)] text-xs font-medium whitespace-nowrap transition-colors",
+                  "px-2.5 h-7 rounded-full text-xs font-medium whitespace-nowrap transition-colors",
                   filter === f.value
-                    ? "bg-[var(--surface-inverse)] text-white"
-                    : "text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)]",
+                    ? "bg-inverse text-on-inverse"
+                    : "text-muted hover:bg-sunken",
                 ].join(" ")}
               >
                 {f.label}
@@ -184,27 +221,53 @@ export default function DispatchBoard() {
             ))}
           </div>
 
-          <div className="max-h-[calc(100vh-24rem)] overflow-y-auto">
-            <BookingsList
-              bookings={visibleBookings}
-              loading={bookingsQuery.isLoading}
-              onChanged={refreshAll}
-              onAddBooking={() => setFormOpen(true)}
-            />
+          {/* Bounded by viewport height rather than a fixed rem offset:
+              `24rem` assumed a specific amount of chrome above, which
+              left roughly three visible rows on a 13" laptop. */}
+          <div className="max-h-[min(60vh,40rem)] overflow-y-auto">
+            <QueryState
+              query={bookingsQuery}
+              errorTitle="Không tải được hàng chờ"
+              skeleton={
+                <div className="space-y-2 p-3">
+                  <Skeleton className="h-[72px] w-full" count={3} />
+                </div>
+              }
+            >
+              {() => (
+                <BookingsList
+                  bookings={visibleBookings}
+                  filtered={filter !== "all"}
+                  onChanged={refreshAll}
+                  onAddBooking={() => setFormOpen(true)}
+                  onClearFilter={() => setFilter("all")}
+                />
+              )}
+            </QueryState>
           </div>
         </Card>
 
         {/* Cars */}
         <section aria-labelledby="cars-heading">
           <div className="flex items-center justify-between mb-3">
-            <h2 id="cars-heading" className="text-sm font-semibold">
+            <h2 id="cars-heading" className="text-base font-semibold">
               Xe đã ghép
-              <span className="text-[var(--text-tertiary)] font-normal ml-1.5 tnum">
+              <span className="text-faint font-normal ml-1.5 tnum">
                 {trips.length}
               </span>
             </h2>
           </div>
-          <TripsPanel trips={trips} loading={tripsQuery.isLoading} />
+          <QueryState
+            query={tripsQuery}
+            errorTitle="Không tải được danh sách chuyến"
+            skeleton={
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <Skeleton className="h-52 w-full rounded-lg" count={3} />
+              </div>
+            }
+          >
+            {(tripList) => <TripsPanel trips={tripList} />}
+          </QueryState>
         </section>
       </div>
 
@@ -236,13 +299,13 @@ function Stat({
 }) {
   const color =
     tone === "warning"
-      ? "text-[var(--warning)]"
+      ? "text-warning"
       : tone === "success"
-        ? "text-[var(--success)]"
-        : "text-[var(--text)]";
+        ? "text-success"
+        : "text-ink";
   return (
     <Card className="px-4 py-3">
-      <p className="text-[11px] text-[var(--text-tertiary)] mb-1">{label}</p>
+      <p className="text-2xs text-faint mb-1">{label}</p>
       <p className={`text-xl font-semibold tnum ${color}`}>{value}</p>
     </Card>
   );

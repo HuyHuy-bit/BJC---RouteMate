@@ -1,6 +1,8 @@
 import type {
+  BookingOut,
   BookingStatus,
   BookingDirection,
+  TripOut,
   TripStatus,
   VehicleStatus,
 } from "../types";
@@ -39,6 +41,45 @@ export function fmtDayLabel(iso: string): string {
   if (sameDay(d, today)) return "Hôm nay";
   if (sameDay(d, tomorrow)) return "Ngày mai";
   return d.toLocaleDateString("vi-VN", { day: "2-digit", month: "2-digit" });
+}
+
+/**
+ * When this trip leaves — the earliest pickup across its bookings,
+ * preferring the solver's computed ETA over the customer's request.
+ */
+export function tripDeparture(trip: TripOut): string | undefined {
+  return trip.bookings
+    .map((b) => b.estimated_pickup_at ?? b.requested_pickup_at)
+    .filter(Boolean)
+    .sort()[0];
+}
+
+/**
+ * A stable, speakable name for a trip.
+ *
+ * This replaces `Xe ${idx + 1}`, which numbered cars by their position
+ * in whatever array the last refetch happened to produce. "Xe 3" meant
+ * a different vehicle after every poll — and it is the label a
+ * dispatcher reads down the phone to a driver.
+ *
+ * Once a real vehicle is attached, its plate/label IS the identity, and
+ * it matches what FleetStatusTable shows for the same car. Before then
+ * there is no car to name, so the trip is identified by the two things
+ * that actually distinguish it and don't move: where it's going and
+ * when it leaves.
+ */
+export function tripIdentity(trip: TripOut): string {
+  if (trip.vehicle_label) return trip.vehicle_label;
+
+  const direction = trip.bookings[0]?.direction;
+  const departs = tripDeparture(trip);
+  const route = direction ? DIRECTION[direction].short : "Chuyến";
+  return departs ? `${route} · ${fmtTime(departs)}` : route;
+}
+
+/** Seats taken, not bookings — one booking can be a family of four. */
+export function seatsTaken(bookings: BookingOut[]): number {
+  return bookings.reduce((n, b) => n + (b.seats ?? 1), 0);
 }
 
 type Tone = "neutral" | "success" | "warning" | "danger" | "info";

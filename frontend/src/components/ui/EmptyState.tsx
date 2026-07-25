@@ -19,15 +19,15 @@ export default function EmptyState({
     <div className="flex flex-col items-center justify-center text-center py-12 px-6">
       {icon && (
         <div
-          className="w-10 h-10 rounded-[var(--radius-lg)] bg-[var(--surface-sunken)] flex items-center justify-center mb-3 text-[var(--text-tertiary)]"
+          className="w-10 h-10 rounded-lg bg-sunken flex items-center justify-center mb-3 text-faint"
           aria-hidden="true"
         >
           {icon}
         </div>
       )}
-      <p className="text-sm font-medium text-[var(--text)]">{title}</p>
+      <p className="text-base font-medium text-ink">{title}</p>
       {description && (
-        <p className="text-xs text-[var(--text-tertiary)] mt-1 max-w-[36ch]">
+        <p className="text-xs text-faint mt-1 max-w-[36ch]">
           {description}
         </p>
       )}

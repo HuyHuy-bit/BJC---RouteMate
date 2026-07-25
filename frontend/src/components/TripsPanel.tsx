@@ -3,24 +3,39 @@ import { useState } from "react";
 import { Car, Lock, UserRound, Users, Zap, GitMerge } from "lucide-react";
 import { api } from "../lib/api";
 import type { TripOut, TripStatus } from "../types";
-import { DIRECTION, NEXT_TRIP_ACTION, TRIP_STATUS, fmtVnd } from "../lib/format";
+import {
+  DIRECTION,
+  NEXT_TRIP_ACTION,
+  TRIP_STATUS,
+  fmtVnd,
+  seatsTaken,
+  tripIdentity,
+} from "../lib/format";
 import Badge from "./ui/Badge";
 import Button from "./ui/Button";
 import Card from "./ui/Card";
+import ConfirmDialog from "./ui/ConfirmDialog";
 import EmptyState from "./ui/EmptyState";
-import Skeleton from "./ui/Skeleton";
+import Select from "./ui/Select";
 import { useToast } from "./ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 
-export default function TripsPanel({
-  trips,
-  loading,
-}: {
-  trips: TripOut[];
-  loading?: boolean;
-}) {
+// Loading and error states belong to the QueryState wrapper at the
+// call site, so this component only ever renders real data.
+export default function TripsPanel({ trips }: { trips: TripOut[] }) {
   const toast = useToast();
   const queryClient = useQueryClient();
+  // Keyed by "<action>:<tripId>" so a spinner appears on the one
+  // control being used, not on every card at once.
+  const [busy, setBusy] = useState<string | null>(null);
+  const [pendingMerge, setPendingMerge] = useState<{
+    source: TripOut;
+    target: TripOut;
+  } | null>(null);
+  const [pendingReassign, setPendingReassign] = useState<{
+    trip: TripOut;
+    driverId: string;
+  } | null>(null);
 
   const driversQuery = useQuery({
     queryKey: ["drivers"],
@@ -35,13 +50,18 @@ export default function TripsPanel({
 
   const handleAssign = async (trip: TripOut, driverId: string) => {
     if (!driverId) return;
+    setBusy(`assign:${trip.id}`);
     try {
       await api.dispatch.assignDriver(trip.id, driverId);
       const name = driversQuery.data?.find((d) => d.id === driverId)?.full_name;
       toast(`Đã giao chuyến cho ${name ?? "tài xế"}.`, "success");
+      setPendingReassign(null);
       refresh();
-    } catch {
-      toast("Không giao được chuyến. Thử lại.", "error");
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không giao được chuyến. Thử lại."), "error");
+      setPendingReassign(null);
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -65,23 +85,20 @@ export default function TripsPanel({
     }
   };
 
-  const handleMerge = async (sourceId: string, targetId: string) => {
+  const handleMerge = async (source: TripOut, target: TripOut) => {
+    setBusy(`merge:${source.id}`);
     try {
-      await api.dispatch.mergeTrips(sourceId, targetId);
+      await api.dispatch.mergeTrips(source.id, target.id);
       toast("Đã gộp hai chuyến.", "success");
+      setPendingMerge(null);
       refresh();
     } catch (err: any) {
       toast(getErrorMessage(err, "Không gộp được chuyến."), "error");
+      setPendingMerge(null);
+    } finally {
+      setBusy(null);
     }
   };
-
-  if (loading) {
-    return (
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        <Skeleton className="h-52 w-full rounded-[var(--radius-lg)]" count={3} />
-      </div>
-    );
-  }
 
   if (trips.length === 0) {
     return (
@@ -95,7 +112,7 @@ export default function TripsPanel({
 
   return (
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-      {trips.map((trip, idx) => {
+      {trips.map((trip) => {
         const status = TRIP_STATUS[trip.status];
         const action = NEXT_TRIP_ACTION[trip.status];
         const revenue = trip.bookings.reduce((s, b) => s + b.price_vnd, 0);
@@ -117,17 +134,16 @@ export default function TripsPanel({
             key={trip.id}
             as="article"
             interactive
-            accent={trip.is_private ? "var(--brand-red)" : "var(--brand-blue)"}
             className="p-4 flex flex-col"
           >
             <header className="flex items-start justify-between gap-2 mb-3">
               <div>
-                <h3 className="text-sm font-semibold flex items-center gap-1.5">
-                  <Car size={14} aria-hidden="true" className="text-[var(--text-tertiary)]" />
-                  Xe {idx + 1}
+                <h3 className="text-base font-semibold flex items-center gap-1.5">
+                  <Car size={14} aria-hidden="true" className="text-faint" />
+                  {tripIdentity(trip)}
                 </h3>
                 {direction && (
-                  <p className="text-[11px] text-[var(--text-tertiary)] mt-0.5">
+                  <p className="text-2xs text-faint mt-0.5">
                     {DIRECTION[direction].label}
                   </p>
                 )}
@@ -135,7 +151,7 @@ export default function TripsPanel({
               <Badge tone={status.tone}>{status.label}</Badge>
             </header>
 
-            <p className="text-[11px] text-[var(--text-tertiary)] flex items-center gap-1.5 mb-2">
+            <p className="text-2xs text-faint flex items-center gap-1.5 mb-2">
               {trip.is_private ? (
                 <>
                   <Lock size={11} aria-hidden="true" /> Bao xe riêng
@@ -145,16 +161,16 @@ export default function TripsPanel({
                   {/* Seats, not booking count — one booking can be a
                       family of several. */}
                   <Users size={11} aria-hidden="true" />{" "}
-                  {trip.bookings.reduce((n, b) => n + (b.seats ?? 1), 0)}/4 chỗ
+                  {seatsTaken(trip.bookings)}/4 chỗ
                 </>
               )}
             </p>
 
             <ol className="space-y-1.5 mb-4 flex-1">
               {trip.bookings.map((b, i) => (
-                <li key={b.id} className="flex items-baseline gap-2 text-[13px]">
+                <li key={b.id} className="flex items-baseline gap-2 text-sm">
                   <span
-                    className="tnum text-[10px] text-[var(--text-tertiary)] w-3.5 shrink-0"
+                    className="tnum text-2xs text-faint w-3.5 shrink-0"
                     aria-hidden="true"
                   >
                     {i + 1}
@@ -164,26 +180,33 @@ export default function TripsPanel({
               ))}
             </ol>
 
-            <div className="space-y-2 pt-3 border-t border-[var(--border)]">
+            <div className="space-y-2 pt-3 border-t border-line">
               {!isForming && (
-                <label className="block">
-                  <span className="sr-only">Tài xế cho xe {idx + 1}</span>
-                  <div className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] mb-1">
-                    <UserRound size={11} aria-hidden="true" /> Tài xế
-                  </div>
-                  <select
-                    value={trip.driver_id ?? ""}
-                    onChange={(e) => handleAssign(trip, e.target.value)}
-                    className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
-                  >
-                    <option value="">Chưa giao</option>
-                    {driversQuery.data?.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.full_name}
-                      </option>
-                    ))}
-                  </select>
-                </label>
+                <Select
+                  label={`Tài xế cho ${tripIdentity(trip)}`}
+                  labelHidden
+                  icon={<UserRound size={11} aria-hidden="true" />}
+                  value={trip.driver_id ?? ""}
+                  placeholder="Chưa giao"
+                  pending={busy === `assign:${trip.id}`}
+                  options={[
+                    { value: "", label: "Chưa giao" },
+                    ...(driversQuery.data ?? []).map((d) => ({
+                      value: d.id,
+                      label: d.full_name,
+                    })),
+                  ]}
+                  onChange={(driverId) => {
+                    // Reassigning a driver who is already en route is
+                    // disruptive enough to be worth a question; the
+                    // first assignment isn't.
+                    if (trip.driver_id && driverId !== trip.driver_id) {
+                      setPendingReassign({ trip, driverId });
+                    } else {
+                      handleAssign(trip, driverId);
+                    }
+                  }}
+                />
               )}
 
               {isForming && (
@@ -202,28 +225,26 @@ export default function TripsPanel({
                   </Button>
 
                   {mergeCandidates.length > 0 && (
-                    <label className="block">
-                      <span className="flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)] mb-1">
-                        <GitMerge size={11} aria-hidden="true" /> Gộp với xe khác
-                      </span>
-                      <select
-                        value=""
-                        onChange={(e) => {
-                          if (e.target.value) handleMerge(trip.id, e.target.value);
-                        }}
-                        className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
-                      >
-                        <option value="">Chọn xe để gộp...</option>
-                        {mergeCandidates.map((t) => {
-                          const tIdx = trips.findIndex((x) => x.id === t.id);
-                          return (
-                            <option key={t.id} value={t.id}>
-                              Xe {tIdx + 1} ({t.bookings.length} khách)
-                            </option>
-                          );
-                        })}
-                      </select>
-                    </label>
+                    /* Merging is irreversible and used to fire straight
+                       off the native select's change event — one stray
+                       arrow-key press away. Choosing a target now only
+                       stages it; the confirm dialog commits it. */
+                    <Select
+                      label="Gộp với chuyến khác"
+                      icon={<GitMerge size={11} aria-hidden="true" />}
+                      value=""
+                      placeholder="Chọn chuyến để gộp..."
+                      pending={busy === `merge:${trip.id}`}
+                      options={mergeCandidates.map((t) => ({
+                        value: t.id,
+                        label: tripIdentity(t),
+                        detail: `${seatsTaken(t.bookings)} chỗ đã đặt`,
+                      }))}
+                      onChange={(targetId) => {
+                        const target = trips.find((t) => t.id === targetId);
+                        if (target) setPendingMerge({ source: trip, target });
+                      }}
+                    />
                   )}
                 </>
               )}
@@ -240,15 +261,51 @@ export default function TripsPanel({
               )}
 
               <div className="flex items-center justify-between pt-1">
-                <span className="text-[11px] text-[var(--text-tertiary)]">
+                <span className="text-2xs text-faint">
                   Doanh thu
                 </span>
-                <span className="text-sm font-semibold tnum">{fmtVnd(revenue)}</span>
+                <span className="text-base font-semibold tnum">{fmtVnd(revenue)}</span>
               </div>
             </div>
           </Card>
         );
       })}
+
+      <ConfirmDialog
+        open={pendingMerge !== null}
+        title="Gộp hai chuyến này?"
+        description={
+          pendingMerge
+            ? `Toàn bộ khách của ${tripIdentity(pendingMerge.source)} sẽ chuyển sang ${tripIdentity(pendingMerge.target)} — tổng ${seatsTaken([...pendingMerge.source.bookings, ...pendingMerge.target.bookings])} chỗ. Thao tác này không thể hoàn tác; nếu vượt quá số chỗ của xe, hệ thống sẽ từ chối.`
+            : undefined
+        }
+        confirmLabel="Gộp chuyến"
+        loading={busy?.startsWith("merge:") ?? false}
+        onConfirm={() =>
+          pendingMerge && handleMerge(pendingMerge.source, pendingMerge.target)
+        }
+        onCancel={() => setPendingMerge(null)}
+      />
+
+      <ConfirmDialog
+        open={pendingReassign !== null}
+        title="Đổi tài xế cho chuyến này?"
+        description={
+          pendingReassign
+            ? `Chuyến đã được giao cho một tài xế. Đổi sang ${
+                driversQuery.data?.find((d) => d.id === pendingReassign.driverId)
+                  ?.full_name ?? "tài xế khác"
+              } sẽ gỡ chuyến khỏi tài xế hiện tại — hãy gọi cho họ để họ không chờ vô ích.`
+            : undefined
+        }
+        confirmLabel="Đổi tài xế"
+        loading={busy?.startsWith("assign:") ?? false}
+        onConfirm={() =>
+          pendingReassign &&
+          handleAssign(pendingReassign.trip, pendingReassign.driverId)
+        }
+        onCancel={() => setPendingReassign(null)}
+      />
     </div>
   );
 }

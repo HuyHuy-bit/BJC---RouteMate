@@ -55,7 +55,7 @@ export default function AddressField({
     <div>
       <label
         htmlFor={id}
-        className="flex items-center gap-1.5 text-[12px] font-medium mb-1.5 text-[var(--text-secondary)]"
+        className="flex items-center gap-1.5 text-xs font-medium mb-1.5 text-muted"
       >
         <span
           className="w-2 h-2 rounded-full shrink-0"
@@ -78,7 +78,7 @@ export default function AddressField({
           }}
           placeholder={placeholder}
           aria-describedby={error ? `${id}-error` : undefined}
-          className="flex-1 h-9 px-3 text-sm rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors placeholder:text-[var(--text-tertiary)]"
+          className="flex-1 h-9 px-3 text-base rounded bg-surface border border-line-strong hover:border-faint focus:border-line-focus transition-colors placeholder:text-faint"
         />
         <Button
           type="button"
@@ -96,7 +96,7 @@ export default function AddressField({
       </div>
 
       {error && (
-        <p id={`${id}-error`} role="alert" className="mt-1.5 text-xs text-[var(--warning)]">
+        <p id={`${id}-error`} role="alert" className="mt-1.5 text-xs text-warning">
           {error}
         </p>
       )}
@@ -105,7 +105,7 @@ export default function AddressField({
         <ul
           role="listbox"
           aria-label="Kết quả tìm kiếm"
-          className="mt-2 border border-[var(--border)] rounded-[var(--radius-md)] overflow-hidden bg-[var(--surface)] shadow-[var(--shadow-sm)] animate-slide-up max-h-52 overflow-y-auto"
+          className="mt-2 border border-line rounded-md overflow-hidden bg-surface shadow-sm animate-slide-up max-h-52 overflow-y-auto"
         >
           {results.map((r) => (
             <li key={r.place_id} role="option" aria-selected={false}>
@@ -116,11 +116,11 @@ export default function AddressField({
                   setResults([]);
                   setQuery(r.formatted_address);
                 }}
-                className="w-full text-left px-3 py-2.5 text-[13px] flex items-start gap-2 hover:bg-[var(--surface-sunken)] transition-colors border-b border-[var(--border)] last:border-b-0"
+                className="w-full text-left px-3 py-2.5 text-sm flex items-start gap-2 hover:bg-sunken transition-colors border-b border-line last:border-b-0"
               >
                 <MapPin
                   size={14}
-                  className="mt-0.5 shrink-0 text-[var(--text-tertiary)]"
+                  className="mt-0.5 shrink-0 text-faint"
                   aria-hidden="true"
                 />
                 <span className="leading-snug">{r.formatted_address}</span>
@@ -131,7 +131,7 @@ export default function AddressField({
       )}
 
       {selected && results.length === 0 && (
-        <p className="mt-1.5 text-xs text-[var(--success)] flex items-start gap-1.5">
+        <p className="mt-1.5 text-xs text-success flex items-start gap-1.5">
           <Check size={13} className="mt-0.5 shrink-0" aria-hidden="true" />
           <span className="leading-snug">{selected.formatted_address}</span>
         </p>

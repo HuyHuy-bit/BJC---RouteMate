@@ -13,21 +13,21 @@ interface Props extends ButtonHTMLAttributes<HTMLButtonElement> {
 
 const VARIANTS: Record<Variant, string> = {
   primary:
-    "bg-[var(--brand-red)] text-white hover:bg-[var(--brand-red-hover)] active:scale-[0.98] shadow-[var(--shadow-xs)]",
+    "bg-brand text-white hover:bg-brand-hover active:scale-[0.98] shadow-xs",
   secondary:
-    "bg-[var(--surface)] text-[var(--text)] border border-[var(--border-strong)] hover:bg-[var(--surface-sunken)] active:scale-[0.98]",
+    "bg-surface text-ink border border-line-strong hover:bg-sunken active:scale-[0.98]",
   ghost:
-    "bg-transparent text-[var(--text-secondary)] hover:bg-[var(--surface-sunken)] hover:text-[var(--text)]",
+    "bg-transparent text-muted hover:bg-sunken hover:text-ink",
   danger:
-    "bg-[var(--danger)] text-white hover:brightness-110 active:scale-[0.98]",
+    "bg-danger text-on-danger hover:brightness-110 active:scale-[0.98]",
   "danger-subtle":
-    "bg-transparent text-[var(--danger)] border border-transparent hover:bg-[var(--danger-subtle)] hover:border-[var(--danger)]",
+    "bg-transparent text-danger border border-transparent hover:bg-danger-subtle hover:border-danger",
 };
 
 const SIZES: Record<Size, string> = {
-  sm: "h-7 px-2.5 text-xs gap-1.5 rounded-[var(--radius-sm)]",
-  md: "h-9 px-3.5 text-sm gap-2 rounded-[var(--radius)]",
-  lg: "h-11 px-5 text-sm gap-2 rounded-[var(--radius-md)]",
+  sm: "h-7 px-2.5 text-xs gap-1.5 rounded",
+  md: "h-9 px-3.5 text-base gap-2 rounded",
+  lg: "h-11 px-5 text-base gap-2 rounded-md",
 };
 
 const Button = forwardRef<HTMLButtonElement, Props>(function Button(
@@ -51,7 +51,7 @@ const Button = forwardRef<HTMLButtonElement, Props>(function Button(
       aria-busy={loading || undefined}
       className={[
         "inline-flex items-center justify-center font-medium whitespace-nowrap",
-        "transition-all duration-[var(--duration-fast)] ease-[var(--ease)]",
+        "transition-all duration-fast ease-brand",
         "disabled:opacity-50 disabled:pointer-events-none",
         VARIANTS[variant],
         SIZES[size],

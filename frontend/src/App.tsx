@@ -1,7 +1,9 @@
 import { lazy, Suspense, type ReactNode } from "react";
 import { Navigate, Route, Routes } from "react-router-dom";
 import { useAuth } from "./context/AuthContext";
+import ErrorBoundary from "./components/ErrorBoundary";
 import LoginPage from "./pages/LoginPage";
+import NotFoundPage from "./pages/NotFoundPage";
 import type { UserRole } from "./types";
 
 // Route-level code splitting — the driver bundle shouldn't ship the
@@ -21,7 +23,7 @@ function FullPageLoader() {
       role="status"
       aria-label="Đang tải"
     >
-      <div className="w-6 h-6 rounded-full border-2 border-[var(--border-strong)] border-t-[var(--brand-red)] animate-spin" />
+      <div className="w-6 h-6 rounded-full border-2 border-line-strong border-t-brand animate-spin" />
     </div>
   );
 }
@@ -44,8 +46,9 @@ function ProtectedRoute({
 
 export default function App() {
   return (
-    <Suspense fallback={<FullPageLoader />}>
-      <Routes>
+    <ErrorBoundary>
+      <Suspense fallback={<FullPageLoader />}>
+        <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route
           path="/"
@@ -103,8 +106,9 @@ export default function App() {
             </ProtectedRoute>
           }
         />
-        <Route path="*" element={<Navigate to="/" replace />} />
-      </Routes>
-    </Suspense>
+        <Route path="*" element={<NotFoundPage />} />
+        </Routes>
+      </Suspense>
+    </ErrorBoundary>
   );
 }

@@ -5,6 +5,26 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <link rel="icon" type="image/jpeg" href="/bjc-logo.jpg" />
     <title>Thành Công Limousine · BJC Group — Bảng điều phối</title>
+    <script>
+      // Resolve the theme before first paint. Doing this in React
+      // would paint the light palette first and then repaint dark,
+      // which on an evening shift is a flash of white in a dark room.
+      // Keep the storage key in sync with src/lib/theme.ts.
+      (function () {
+        try {
+          var saved = localStorage.getItem("xeghep_theme");
+          var theme =
+            saved === "light" || saved === "dark"
+              ? saved
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light";
+          document.documentElement.setAttribute("data-theme", theme);
+        } catch (e) {
+          document.documentElement.setAttribute("data-theme", "light");
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

@@ -12,6 +12,8 @@ import Card from "../components/ui/Card";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import EmptyState from "../components/ui/EmptyState";
 import Field from "../components/ui/Field";
+import QueryState from "../components/ui/QueryState";
+import Select from "../components/ui/Select";
 import Skeleton from "../components/ui/Skeleton";
 import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
@@ -107,44 +109,57 @@ export default function FleetPage() {
         </>
       }
     >
-      {/* The dispatch engine will not seal a pool it cannot put a real car
-          under, so an empty fleet means nothing ever departs. Say that
-          plainly rather than letting it look like a bug. */}
-      {!vehiclesQuery.isLoading && vehicles.length === 0 && (
-        <Card>
-          <EmptyState
-            icon={<Car size={18} aria-hidden="true" />}
-            title="Chưa có xe nào trong hệ thống"
-            description="Hệ thống chỉ chốt chuyến khi có xe thật để giao. Thêm xe của công ty để bắt đầu điều phối tự động."
-            action={
-              <Button variant="primary" size="sm" onClick={() => setFormOpen(true)}>
-                Thêm xe đầu tiên
-              </Button>
-            }
-          />
-        </Card>
-      )}
-
-      {vehiclesQuery.isLoading && (
-        <Skeleton className="h-20 w-full rounded-[var(--radius-lg)] mb-3" count={3} />
-      )}
-
-      <div className="space-y-3">
-        {vehicles.map((v) => (
-          <VehicleRow
-            key={v.id}
-            vehicle={v}
-            drivers={driversQuery.data ?? []}
-            onStatusChange={(status) =>
-              updateStatus.mutate({ id: v.id, status })
-            }
-            onDriverChange={(driverId) =>
-              assignDriver.mutate({ id: v.id, driverId })
-            }
-            onDelete={() => setPendingDelete(v)}
-          />
-        ))}
-      </div>
+      <QueryState
+        query={vehiclesQuery}
+        errorTitle="Không tải được đội xe"
+        skeleton={
+          <div className="space-y-3">
+            <Skeleton className="h-20 w-full rounded-lg" count={3} />
+          </div>
+        }
+        empty={
+          /* The dispatch engine will not seal a pool it cannot put a real
+             car under, so an empty fleet means nothing ever departs. Say
+             that plainly rather than letting it look like a bug. */
+          <Card>
+            <EmptyState
+              icon={<Car size={18} aria-hidden="true" />}
+              title="Chưa có xe nào trong hệ thống"
+              description="Hệ thống chỉ chốt chuyến khi có xe thật để giao. Thêm xe của công ty để bắt đầu điều phối tự động."
+              action={
+                <Button variant="primary" size="sm" onClick={() => setFormOpen(true)}>
+                  Thêm xe đầu tiên
+                </Button>
+              }
+            />
+          </Card>
+        }
+      >
+        {(vehicleList) => (
+          <div className="space-y-3">
+            {vehicleList.map((v) => (
+              <VehicleRow
+                key={v.id}
+                vehicle={v}
+                drivers={driversQuery.data ?? []}
+                onStatusChange={(status) =>
+                  updateStatus.mutate({ id: v.id, status })
+                }
+                onDriverChange={(driverId) =>
+                  assignDriver.mutate({ id: v.id, driverId })
+                }
+                onDelete={() => setPendingDelete(v)}
+                statusPending={
+                  updateStatus.isPending && updateStatus.variables?.id === v.id
+                }
+                driverPending={
+                  assignDriver.isPending && assignDriver.variables?.id === v.id
+                }
+              />
+            ))}
+          </div>
+        )}
+      </QueryState>
 
       <ConfirmDialog
         open={pendingDelete !== null}
@@ -179,12 +194,16 @@ function VehicleRow({
   onStatusChange,
   onDriverChange,
   onDelete,
+  statusPending = false,
+  driverPending = false,
 }: {
   vehicle: VehicleOut;
   drivers: { id: string; full_name: string }[];
   onStatusChange: (s: VehicleStatus) => void;
   onDriverChange: (driverId: string | null) => void;
   onDelete: () => void;
+  statusPending?: boolean;
+  driverPending?: boolean;
 }) {
   const status = VEHICLE_STATUS[vehicle.status];
   return (
@@ -192,12 +211,12 @@ function VehicleRow({
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="flex items-center gap-2">
-            <span className="text-sm font-semibold tnum">
+            <span className="text-base font-semibold tnum">
               {vehicle.plate_number}
             </span>
             <Badge tone={status.tone}>{status.label}</Badge>
           </div>
-          <p className="text-xs text-[var(--text-tertiary)] mt-0.5">
+          <p className="text-xs text-faint mt-0.5">
             {vehicle.label ?? "Chưa đặt tên"} · {vehicle.seat_capacity} chỗ
           </p>
         </div>
@@ -213,40 +232,30 @@ function VehicleRow({
       </div>
 
       <div className="grid sm:grid-cols-2 gap-3">
-        <label className="block">
-          <span className="block text-[11px] text-[var(--text-tertiary)] mb-1">
-            Trạng thái
-          </span>
-          <select
-            value={vehicle.status}
-            onChange={(e) => onStatusChange(e.target.value as VehicleStatus)}
-            className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
-          >
-            {STATUS_OPTIONS.map((s) => (
-              <option key={s} value={s}>
-                {VEHICLE_STATUS[s].label}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Select
+          label="Trạng thái"
+          accessibleName={`Trạng thái xe ${vehicle.plate_number}`}
+          value={vehicle.status}
+          pending={statusPending}
+          options={STATUS_OPTIONS.map((s) => ({
+            value: s,
+            label: VEHICLE_STATUS[s].label,
+          }))}
+          onChange={(s) => onStatusChange(s as VehicleStatus)}
+        />
 
-        <label className="block">
-          <span className="block text-[11px] text-[var(--text-tertiary)] mb-1">
-            Tài xế mặc định
-          </span>
-          <select
-            value={vehicle.default_driver_id ?? ""}
-            onChange={(e) => onDriverChange(e.target.value || null)}
-            className="w-full h-8 px-2 text-xs rounded-[var(--radius)] bg-[var(--surface)] border border-[var(--border-strong)] hover:border-[var(--text-tertiary)] focus:border-[var(--border-focus)] transition-colors"
-          >
-            <option value="">Chưa gán</option>
-            {drivers.map((d) => (
-              <option key={d.id} value={d.id}>
-                {d.full_name}
-              </option>
-            ))}
-          </select>
-        </label>
+        <Select
+          label="Tài xế mặc định"
+          accessibleName={`Tài xế mặc định cho xe ${vehicle.plate_number}`}
+          value={vehicle.default_driver_id ?? ""}
+          placeholder="Chưa gán"
+          pending={driverPending}
+          options={[
+            { value: "", label: "Chưa gán" },
+            ...drivers.map((d) => ({ value: d.id, label: d.full_name })),
+          ]}
+          onChange={(driverId) => onDriverChange(driverId || null)}
+        />
       </div>
     </Card>
   );

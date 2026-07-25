@@ -7,6 +7,7 @@ import { DIRECTION } from "../lib/format";
 import Badge from "./ui/Badge";
 import Button from "./ui/Button";
 import Card from "./ui/Card";
+import { ErrorState } from "./ui/QueryState";
 import { useToast } from "./ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 
@@ -97,16 +98,36 @@ export default function AttentionPanel() {
     }
   };
 
+  // This panel hides itself when there's nothing to act on, which is
+  // right — but it must not hide itself when it simply failed to ask.
+  // These are trips that need a human to phone a customer; silently
+  // vanishing is the most expensive failure mode on this screen.
+  if (attentionQuery.isError) {
+    return (
+      <div className="mb-6">
+        <ErrorState
+          title="Không kiểm tra được chuyến cần xử lý"
+          message={getErrorMessage(
+            attentionQuery.error,
+            "Có thể đang có chuyến cần bạn gọi khách mà hệ thống chưa tải được. Thử lại để kiểm tra."
+          )}
+          onRetry={() => attentionQuery.refetch()}
+          retrying={attentionQuery.isFetching}
+        />
+      </div>
+    );
+  }
+
   const items = attentionQuery.data ?? [];
-  if (!attentionQuery.isLoading && items.length === 0) return null;
+  if (!attentionQuery.isPending && items.length === 0) return null;
 
   return (
     <div className="mb-6">
-      <h2 className="text-sm font-semibold mb-2 flex items-center gap-1.5">
-        <AlertTriangle size={14} className="text-[var(--warning)]" aria-hidden="true" />
+      <h2 className="text-base font-semibold mb-2 flex items-center gap-1.5">
+        <AlertTriangle size={14} className="text-warning" aria-hidden="true" />
         Cần xử lý
         {items.length > 0 && (
-          <span className="text-[var(--warning)] tnum">({items.length})</span>
+          <span className="text-warning tnum">({items.length})</span>
         )}
       </h2>
 
@@ -114,7 +135,7 @@ export default function AttentionPanel() {
         {items.map((item) => (
           <Card
             key={item.trip_id}
-            className="p-4 border-l-[3px] border-l-[var(--warning)]"
+            className="p-4 border-l-[3px] border-l-warning"
           >
             <div className="flex flex-wrap items-start justify-between gap-3">
               <div className="min-w-0">
@@ -122,23 +143,23 @@ export default function AttentionPanel() {
                   <Badge tone="warning">
                     {KIND_BADGE[item.kind].icon} {KIND_BADGE[item.kind].label}
                   </Badge>
-                  <span className="text-xs text-[var(--text-tertiary)]">
+                  <span className="text-xs text-faint">
                     {DIRECTION[item.direction].label} · {item.passenger_count} khách
                     {item.minutes_overdue > 0 &&
                       ` · trễ ${Math.round(item.minutes_overdue)} phút`}
                   </span>
                 </div>
-                <p className="text-sm text-[var(--text)]">{item.reason}</p>
+                <p className="text-base text-ink">{item.reason}</p>
                 {/* Tap-to-call: resolving one of these means phoning
                     the customer — there's no customer-facing channel,
                     so don't make staff copy a number by hand. */}
-                <ul className="text-xs text-[var(--text-tertiary)] mt-1 space-y-0.5">
+                <ul className="text-xs text-faint mt-1 space-y-0.5">
                   {item.bookings.map((b) => (
                     <li key={b.id} className="flex items-center gap-1.5">
                       <span>{b.customer.full_name}</span>
                       <a
                         href={`tel:${b.customer.phone}`}
-                        className="inline-flex items-center gap-1 text-[var(--brand-blue)] font-medium hover:underline"
+                        className="inline-flex items-center gap-1 text-cobalt font-medium hover:underline"
                         aria-label={`Gọi ${b.customer.full_name}`}
                       >
                         <Phone size={11} aria-hidden="true" />
@@ -153,7 +174,7 @@ export default function AttentionPanel() {
                     {item.options.map((o) => (
                       <span
                         key={o}
-                        className="text-[10px] px-1.5 py-0.5 rounded-[var(--radius-sm)] bg-[var(--surface-sunken)] text-[var(--text-tertiary)]"
+                        className="text-2xs px-1.5 py-0.5 rounded bg-sunken text-faint"
                       >
                         {OPTION_LABEL[o] ?? o}
                       </span>

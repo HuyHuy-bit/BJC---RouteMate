@@ -9,6 +9,7 @@ import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import EmptyState from "../components/ui/EmptyState";
+import QueryState from "../components/ui/QueryState";
 import Skeleton from "../components/ui/Skeleton";
 import { fmtDateTime } from "../lib/format";
 
@@ -38,8 +39,6 @@ export default function NotificationsPage() {
     }
   };
 
-  const notes = notificationsQuery.data ?? [];
-
   return (
     <AppShell
       title="Thông báo khách hàng"
@@ -53,30 +52,35 @@ export default function NotificationsPage() {
         </Link>
       }
     >
-      {notificationsQuery.isLoading && (
-        <Skeleton className="h-24 w-full rounded-[var(--radius-lg)] mb-3" count={4} />
-      )}
-
-      {!notificationsQuery.isLoading && notes.length === 0 && (
-        <Card>
-          <EmptyState
-            icon={<MessageSquareText size={18} aria-hidden="true" />}
-            title="Chưa có thông báo nào"
-            description="Khi một chuyến được xếp xe hoặc gán tài xế, tin nhắn dành cho khách sẽ xuất hiện ở đây."
-          />
-        </Card>
-      )}
-
-      <div className="space-y-2">
-        {notes.map((n) => (
+      <QueryState
+        query={notificationsQuery}
+        errorTitle="Không tải được thông báo"
+        skeleton={
+          <div className="space-y-3">
+            <Skeleton className="h-24 w-full rounded-lg" count={4} />
+          </div>
+        }
+        empty={
+          <Card>
+            <EmptyState
+              icon={<MessageSquareText size={18} aria-hidden="true" />}
+              title="Chưa có thông báo nào"
+              description="Khi một chuyến được xếp xe hoặc gán tài xế, tin nhắn dành cho khách sẽ xuất hiện ở đây."
+            />
+          </Card>
+        }
+      >
+        {(notes) => (
+          <div className="space-y-2">
+            {notes.map((n) => (
           <Card key={n.id} className="p-4">
             <div className="flex items-start justify-between gap-3 mb-2">
               <div className="min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium">{n.customer_name}</span>
+                  <span className="text-base font-medium">{n.customer_name}</span>
                   <Badge tone="neutral">{EVENT_LABEL[n.event] ?? n.event}</Badge>
                 </div>
-                <p className="text-xs text-[var(--text-tertiary)] tnum mt-0.5">
+                <p className="text-xs text-faint tnum mt-0.5">
                   {n.customer_phone} · {fmtDateTime(n.created_at)}
                 </p>
               </div>
@@ -96,12 +100,14 @@ export default function NotificationsPage() {
                 {copiedId === n.id ? "Đã chép" : "Sao chép"}
               </Button>
             </div>
-            <p className="text-sm text-[var(--text-secondary)] leading-relaxed bg-[var(--surface-sunken)] rounded-[var(--radius)] p-3">
+            <p className="text-base text-muted leading-relaxed bg-sunken rounded p-3">
               {n.message}
             </p>
           </Card>
-        ))}
-      </div>
+            ))}
+          </div>
+        )}
+      </QueryState>
     </AppShell>
   );
 }

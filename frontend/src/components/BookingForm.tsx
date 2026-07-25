@@ -1,13 +1,19 @@
-import { useState } from "react";
+import { lazy, Suspense, useState } from "react";
 import { Lock, Users } from "lucide-react";
 import { api } from "../lib/api";
 import type { GeocodeResult } from "../types";
 import Button from "./ui/Button";
 import Field from "./ui/Field";
-import MapView, { MAP_COLORS } from "./MapView";
 import AddressField from "./AddressField";
 import { useToast } from "./ui/Toast";
 import { getErrorMessage } from "../lib/errors";
+import { MAP_COLORS } from "../lib/mapColors";
+
+// goong-js is ~700kB and this map only appears once an address has
+// actually been geocoded, inside a slide-over the dispatcher may
+// never open. Importing it eagerly put the whole library in the
+// dispatch board's initial chunk.
+const MapView = lazy(() => import("./MapView"));
 
 const PICKUP_COLOR = MAP_COLORS.pickup;
 const DROPOFF_COLOR = MAP_COLORS.dropoff;
@@ -118,8 +124,18 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
 
       {pins.length > 0 && (
         <div className="animate-fade-in">
-          <MapView pins={pins} height={200} />
-          <div className="flex items-center gap-4 mt-2 text-[11px] text-[var(--text-tertiary)]">
+          <Suspense
+            fallback={
+              <div
+                className="skeleton w-full rounded-md"
+                style={{ height: 200 }}
+                aria-hidden="true"
+              />
+            }
+          >
+            <MapView pins={pins} height={200} />
+          </Suspense>
+          <div className="flex items-center gap-4 mt-2 text-2xs text-faint">
             <span className="flex items-center gap-1.5">
               <span
                 className="w-2 h-2 rounded-full"
@@ -151,7 +167,7 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
       />
 
       <fieldset className="border-0 p-0 m-0">
-        <legend className="text-[12px] font-medium mb-2 text-[var(--text-secondary)]">
+        <legend className="text-xs font-medium mb-2 text-muted">
           Hình thức
         </legend>
         <div className="grid sm:grid-cols-2 gap-2">
@@ -176,7 +192,7 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
           whole car however many people travel in it. */}
       {!isPrivate && (
         <fieldset className="border-0 p-0 m-0">
-          <legend className="text-[12px] font-medium mb-2 text-[var(--text-secondary)]">
+          <legend className="text-xs font-medium mb-2 text-muted">
             Số khách đi cùng
           </legend>
           <div className="flex items-center gap-2">
@@ -187,17 +203,17 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
                 aria-pressed={seats === n}
                 onClick={() => setSeats(n)}
                 className={[
-                  "w-10 h-10 rounded-[var(--radius)] text-sm font-medium tnum transition-colors",
+                  "w-10 h-10 rounded text-base font-medium tnum transition-colors",
                   "border",
                   seats === n
-                    ? "bg-[var(--surface-inverse)] text-white border-transparent"
-                    : "bg-[var(--surface)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:bg-[var(--surface-sunken)]",
+                    ? "bg-inverse text-on-inverse border-transparent"
+                    : "bg-surface text-muted border-line-strong hover:bg-sunken",
                 ].join(" ")}
               >
                 {n}
               </button>
             ))}
-            <span className="text-xs text-[var(--text-tertiary)] ml-1">
+            <span className="text-xs text-faint ml-1">
               {seats > 1
                 ? `${seats} chỗ trên cùng một xe`
                 : "1 chỗ"}
@@ -240,23 +256,23 @@ function RideTypeOption({
       onClick={onSelect}
       aria-pressed={selected}
       className={[
-        "text-left p-3 rounded-[var(--radius-md)] border transition-all duration-[var(--duration-fast)]",
+        "text-left p-3 rounded-md border transition-all duration-fast",
         selected
-          ? "border-[var(--brand-red)] bg-[var(--brand-red-subtle)]"
-          : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--text-tertiary)]",
+          ? "border-brand bg-brand-subtle"
+          : "border-line-strong bg-surface hover:border-faint",
       ].join(" ")}
     >
       <div className="flex items-center gap-2">
         <span
           className={
-            selected ? "text-[var(--brand-red)]" : "text-[var(--text-tertiary)]"
+            selected ? "text-brand-text" : "text-faint"
           }
         >
           {icon}
         </span>
-        <span className="text-sm font-medium">{title}</span>
+        <span className="text-base font-medium">{title}</span>
       </div>
-      <p className="text-xs text-[var(--text-tertiary)] mt-1">{description}</p>
+      <p className="text-xs text-faint mt-1">{description}</p>
     </button>
   );
 }

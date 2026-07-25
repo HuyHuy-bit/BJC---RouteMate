@@ -13,6 +13,7 @@ import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
 import ConfirmDialog from "../components/ui/ConfirmDialog";
 import EmptyState from "../components/ui/EmptyState";
+import QueryState from "../components/ui/QueryState";
 import Skeleton from "../components/ui/Skeleton";
 import { useToast } from "../components/ui/Toast";
 
@@ -91,27 +92,32 @@ export default function EmployeesPage() {
         </>
       }
     >
-      {usersQuery.isLoading && (
-        <Skeleton className="h-16 w-full rounded-[var(--radius-lg)] mb-2" count={5} />
-      )}
-
-      {!usersQuery.isLoading && users.length === 0 && (
-        <Card>
-          <EmptyState
-            icon={<Users size={18} aria-hidden="true" />}
-            title="Chưa có nhân viên nào"
-            description="Thêm tài khoản cho điều phối viên, tài xế hoặc quản trị viên khác."
-          />
-        </Card>
-      )}
-
+      <QueryState
+        query={usersQuery}
+        errorTitle="Không tải được danh sách nhân viên"
+        skeleton={
+          <div className="space-y-2">
+            <Skeleton className="h-16 w-full rounded-lg" count={5} />
+          </div>
+        }
+        empty={
+          <Card>
+            <EmptyState
+              icon={<Users size={18} aria-hidden="true" />}
+              title="Chưa có nhân viên nào"
+              description="Thêm tài khoản cho điều phối viên, tài xế hoặc quản trị viên khác."
+            />
+          </Card>
+        }
+      >
+        {() => (
       <div className="space-y-6">
         {ROLE_ORDER.map((role) => {
           const list = grouped[role];
           if (!list || list.length === 0) return null;
           return (
             <section key={role}>
-              <h2 className="text-xs font-medium text-[var(--text-tertiary)] mb-2 tracking-wide uppercase">
+              <h2 className="text-xs font-medium text-faint mb-2 tracking-wide uppercase">
                 {ROLE_LABEL[role]}
                 <span className="ml-1.5 tnum">({list.length})</span>
               </h2>
@@ -125,13 +131,13 @@ export default function EmployeesPage() {
                     >
                       <div className="min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-medium truncate">
+                          <span className="text-base font-medium truncate">
                             {u.full_name}
                           </span>
                           {isSelf && <Badge tone="info">Bạn</Badge>}
                           {!u.is_active && <Badge tone="danger">Đã khoá</Badge>}
                         </div>
-                        <p className="text-xs text-[var(--text-tertiary)] mt-0.5 flex items-center gap-1 tnum">
+                        <p className="text-xs text-faint mt-0.5 flex items-center gap-1 tnum">
                           <Phone size={11} aria-hidden="true" />
                           {u.phone}
                         </p>
@@ -169,7 +175,7 @@ export default function EmployeesPage() {
                           }
                           aria-label={`Xoá ${u.full_name}`}
                           onClick={() => setPendingDelete(u)}
-                          className="!px-1.5 !text-[var(--text-tertiary)] hover:!text-[var(--danger)]"
+                          className="!px-1.5 !text-faint hover:!text-danger"
                         >
                           <Trash2 size={13} aria-hidden="true" />
                         </Button>
@@ -182,6 +188,8 @@ export default function EmployeesPage() {
           );
         })}
       </div>
+        )}
+      </QueryState>
 
       <ConfirmDialog
         open={pendingDeactivate !== null}

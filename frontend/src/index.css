@@ -6,10 +6,21 @@
 
 /* ============================================================
    DESIGN TOKENS
-   Single source of truth. Components reference these only —
-   no hardcoded hex values anywhere in component files.
+   Single source of truth. These are mirrored into
+   tailwind.config.js, so components use semantic utilities
+   (bg-surface, text-tertiary) rather than arbitrary
+   bg-[var(--surface)] values. Never hardcode a hex in a
+   component; never reach for var(--x) in a class either.
+
+   Theme resolution: a boot script in index.html stamps
+   data-theme="light|dark" on <html> before first paint, from
+   localStorage or prefers-color-scheme. So the dark palette
+   lives in exactly one place below.
    ============================================================ */
-:root {
+:root,
+:root[data-theme="light"] {
+  color-scheme: light;
+
   /* --- Brand (from BJC logo + Thành Công fleet livery) --- */
   --brand-red: #d6331f;
   --brand-red-hover: #b82a19;
@@ -20,19 +31,23 @@
   /* --- Surfaces --- */
   --bg: #f7f8fa;
   --surface: #ffffff;
-  --surface-raised: #ffffff;
   --surface-sunken: #f1f3f6;
   --surface-inverse: #101728;
+  --text-on-inverse: #ffffff;
 
-  /* --- Text (all AA-compliant on --surface) --- */
-  --text: #101728;          /* 16.1:1 */
-  --text-secondary: #4a5568; /* 8.1:1  */
-  --text-tertiary: #64748b;  /* 5.3:1  — AA for normal text */
+  /* --- Text. Ratios below are the WORST case across all three
+         surfaces (sunken is darkest), not just against white. --- */
+  --text: #101728;           /* 16.07:1 */
+  --text-secondary: #4a5568; /*  6.77:1 */
+  --text-tertiary: #5b667a;  /*  5.21:1 — was #64748b at 4.28, under AA */
   --text-inverse: #ffffff;
 
-  /* --- Borders --- */
+  /* --- Borders ---
+     --border is decorative separation (exempt from 1.4.11).
+     --border-strong is the visible edge of a real control, so it
+     must clear 3:1 — it measures 3.28:1 on --surface. */
   --border: #e3e7ed;
-  --border-strong: #cbd2db;
+  --border-strong: #858f9c;
   --border-focus: var(--brand-blue);
 
   /* --- Semantic --- */
@@ -45,23 +60,8 @@
   --info: var(--brand-blue);
   --info-subtle: var(--brand-blue-subtle);
 
-  /* --- Spacing scale (4px base) --- */
-  --space-1: 0.25rem;
-  --space-2: 0.5rem;
-  --space-3: 0.75rem;
-  --space-4: 1rem;
-  --space-5: 1.25rem;
-  --space-6: 1.5rem;
-  --space-8: 2rem;
-  --space-10: 2.5rem;
-  --space-12: 3rem;
-
-  /* --- Radius --- */
-  --radius-sm: 4px;
-  --radius: 6px;
-  --radius-md: 8px;
-  --radius-lg: 12px;
-  --radius-full: 9999px;
+  /* --- Skeleton shimmer highlight --- */
+  --shimmer: #e8ebf0;
 
   /* --- Elevation --- */
   --shadow-xs: 0 1px 2px rgba(16, 23, 40, 0.04);
@@ -69,7 +69,89 @@
   --shadow-md: 0 4px 12px rgba(16, 23, 40, 0.08), 0 2px 4px rgba(16, 23, 40, 0.04);
   --shadow-lg: 0 12px 32px rgba(16, 23, 40, 0.12), 0 4px 8px rgba(16, 23, 40, 0.06);
 
-  /* --- Type --- */
+  /* --- Scrim behind modals --- */
+  --scrim: rgba(16, 23, 40, 0.35);
+}
+
+/* ============================================================
+   DARK — for evening dispatch shifts.
+   Brand red keeps its exact light-mode value for FILLS (white on
+   #d6331f is 4.82:1 either way) so the brand reads identically.
+   A separate --brand-red-text is lifted for the cases where red
+   is used as text or an icon on a dark ground, where #d6331f
+   would only reach 1.9:1.
+   ============================================================ */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --brand-red: #d6331f;
+  --brand-red-hover: #e8442d;
+  --brand-red-subtle: #2a1512;
+  --brand-blue: #7fb3ea;
+  --brand-blue-subtle: #111e2c;
+
+  --bg: #0f1216;
+  --surface: #161b21;
+  --surface-sunken: #1e242b;
+  --surface-inverse: #e9ecf0;
+  --text-on-inverse: #101728;
+
+  --text: #e9ecf0;           /* 13.20:1 */
+  --text-secondary: #aab4c0; /*  7.45:1 */
+  --text-tertiary: #8b95a3;  /*  5.16:1 */
+  --text-inverse: #101728;
+
+  --border: #272e36;
+  --border-strong: #5f6979;  /* 3.12:1 on --surface */
+  --border-focus: var(--brand-blue);
+
+  --success: #5fbf92;
+  --success-subtle: #12241c;
+  --warning: #e0a94a;
+  --warning-subtle: #241c0e;
+  --danger: #ff8b78;
+  --danger-subtle: #2a1512;
+  --info: var(--brand-blue);
+  --info-subtle: var(--brand-blue-subtle);
+
+  --shimmer: #252c35;
+
+  /* Shadows barely read on dark grounds — lean on borders there
+     instead, but keep the tokens defined so nothing breaks. */
+  --shadow-xs: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.4);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.45), 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 32px rgba(0, 0, 0, 0.55), 0 4px 8px rgba(0, 0, 0, 0.35);
+
+  --scrim: rgba(0, 0, 0, 0.6);
+}
+
+/* Red as text/icon. Light mode can use the brand value directly;
+   dark mode needs it lifted to stay legible. */
+:root,
+:root[data-theme="light"] { --brand-red-text: #d6331f; }
+:root[data-theme="dark"]  { --brand-red-text: #ff7a63; }
+
+/* Deliberately theme-invariant: the ground behind the login fleet
+   photo. --surface-inverse flips light in dark mode, which is
+   correct for a filter chip but would turn this panel's white
+   text invisible. */
+:root { --photo-ground: #101728; }
+
+/* Text sitting ON a solid semantic fill. --danger inverts between
+   themes (#b3261e light, #ff8b78 dark), so hardcoded white on it
+   would drop to 1.7:1 in dark mode — on the confirm button of
+   every destructive dialog. --brand needs no equivalent: its fill
+   value is identical in both themes, so white always holds. */
+:root,
+:root[data-theme="light"] { --on-danger: #ffffff; }
+:root[data-theme="dark"]  { --on-danger: #2a0f0b; }
+
+/* ============================================================
+   TYPE SCALE — 8 steps, no arbitrary sizes.
+   Body is 14px, so `base` is 14 and the scale grows from there.
+   ============================================================ */
+:root {
   --font-display: "Sora", system-ui, sans-serif;
   --font-body: "Inter", system-ui, sans-serif;
   --font-mono: "JetBrains Mono", ui-monospace, monospace;
@@ -98,7 +180,7 @@ body {
   background: var(--bg);
   color: var(--text);
   font-size: 14px;
-  line-height: 1.5;
+  line-height: 1.55;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
 }
@@ -126,7 +208,10 @@ h1, h2, h3, h4 {
 :focus-visible {
   outline: 2px solid var(--border-focus);
   outline-offset: 2px;
-  border-radius: var(--radius-sm);
+  /* Inherit the element's own radius so the ring matches the shape
+     it surrounds. A fixed radius here drew a 4px-corner rectangle
+     around pill chips and 12px cards alike. */
+  border-radius: inherit;
 }
 
 /* ============================================================
@@ -174,15 +259,16 @@ h1, h2, h3, h4 {
   background: linear-gradient(
     90deg,
     var(--surface-sunken) 25%,
-    #e8ebf0 50%,
+    var(--shimmer) 50%,
     var(--surface-sunken) 75%
   );
   background-size: 200% 100%;
-  border-radius: var(--radius-sm);
-  /* Two animations on one element via comma-separated shorthand — combining
-     this with a separate .animate-fade-in class would silently drop one of
-     them, since two classes each setting `animation` on the same element
-     don't stack, the later rule just wins outright. */
+  border-radius: 6px;
+  /* Two animations on one element via comma-separated shorthand —
+     combining this with a separate .animate-fade-in class would
+     silently drop one of them, since two classes each setting
+     `animation` on the same element don't stack, the later rule
+     just wins outright. */
   animation:
     shimmer 1.4s infinite linear,
     fade-in 0.25s var(--ease) backwards;
@@ -195,7 +281,7 @@ h1, h2, h3, h4 {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border-radius: var(--radius-full);
+  border-radius: 9999px;
   border: 3px solid var(--bg);
 }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-tertiary); }

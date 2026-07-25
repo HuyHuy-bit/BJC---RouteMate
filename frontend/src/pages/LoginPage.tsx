@@ -32,7 +32,7 @@ export default function LoginPage() {
       {/* Brand panel — the fleet photo is the most characteristic thing
           this company owns, so it leads. Hidden on mobile where vertical
           space is scarce and the form is the only job. */}
-      <aside className="relative hidden lg:block overflow-hidden bg-[var(--surface-inverse)]">
+      <aside className="relative hidden lg:block overflow-hidden bg-photo-ground">
         <img
           src="/thanh-cong-fleet.jpg"
           alt=""
@@ -49,22 +49,22 @@ export default function LoginPage() {
           <img
             src="/bjc-logo.jpg"
             alt="BJC Group"
-            className="w-12 h-12 rounded-[var(--radius-md)] object-cover"
+            className="w-12 h-12 rounded-md object-cover"
           />
           <div>
-            <p className="text-[11px] tracking-[0.18em] text-white/70 mb-3 font-[family-name:var(--font-mono)]">
+            <p className="text-2xs tracking-[0.18em] text-white/70 mb-3 font-mono">
               HỆ THỐNG ĐIỀU PHỐI NỘI BỘ
             </p>
-            <h1 className="text-[40px] xl:text-[46px] font-semibold leading-[1.08] max-w-[14ch]">
+            <h1 className="text-3xl xl:text-4xl font-semibold leading-[1.08] max-w-[14ch]">
               Bắc Giang
               <br />
               <span className="text-white/55">⇄</span> Hà Nội
             </h1>
-            <p className="text-sm text-white/75 mt-5 max-w-[42ch] leading-relaxed">
+            <p className="text-base text-white/75 mt-5 max-w-[42ch] leading-relaxed">
               Ghép khách theo quãng đường thực tế, đón và trả tận nơi.
             </p>
           </div>
-          <div className="flex items-center gap-2 text-sm text-white/80">
+          <div className="flex items-center gap-2 text-base text-white/80">
             <Phone size={14} aria-hidden="true" />
             <span>Hotline 1900 8293</span>
           </div>
@@ -72,26 +72,26 @@ export default function LoginPage() {
       </aside>
 
       {/* Form panel */}
-      <div className="flex items-center justify-center p-6 sm:p-10 bg-[var(--bg)]">
+      <div className="flex items-center justify-center p-6 sm:p-10 bg-canvas">
         <div className="w-full max-w-[380px] animate-slide-up">
           <div className="lg:hidden flex items-center gap-2.5 mb-8">
             <img
               src="/bjc-logo.jpg"
               alt=""
-              className="w-9 h-9 rounded-[var(--radius)] object-cover"
+              className="w-9 h-9 rounded object-cover"
             />
             <div>
-              <div className="text-sm font-semibold font-[family-name:var(--font-display)]">
+              <div className="text-base font-semibold font-display">
                 Thành Công Limousine
               </div>
-              <div className="text-[10px] text-[var(--text-tertiary)] tracking-wide">
+              <div className="text-2xs text-faint tracking-wide">
                 BJC GROUP
               </div>
             </div>
           </div>
 
-          <h2 className="text-2xl font-semibold text-[var(--text)]">Đăng nhập</h2>
-          <p className="text-sm text-[var(--text-tertiary)] mt-1.5 mb-7">
+          <h2 className="text-2xl font-semibold text-ink">Đăng nhập</h2>
+          <p className="text-base text-faint mt-1.5 mb-7">
             Dành cho nhân viên điều phối và tài xế.
           </p>
 
@@ -129,7 +129,7 @@ export default function LoginPage() {
             </Button>
           </form>
 
-          <p className="text-xs text-[var(--text-tertiary)] mt-8 text-center lg:hidden">
+          <p className="text-xs text-faint mt-8 text-center lg:hidden">
             Hotline 1900 8293
           </p>
         </div>

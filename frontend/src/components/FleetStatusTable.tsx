@@ -12,7 +12,6 @@ import {
 import Badge from "./ui/Badge";
 import Card from "./ui/Card";
 import EmptyState from "./ui/EmptyState";
-import Skeleton from "./ui/Skeleton";
 
 const PLACE_SUMMARY: {
   place: FleetPlace;
@@ -41,13 +40,9 @@ const PLACE_SUMMARY: {
   },
 ];
 
-export default function FleetStatusTable({
-  trips,
-  loading,
-}: {
-  trips: TripOut[];
-  loading?: boolean;
-}) {
+// Loading and error states belong to the QueryState wrapper at the
+// call site, so this component only ever renders real data.
+export default function FleetStatusTable({ trips }: { trips: TripOut[] }) {
   // Driver names aren't on TripOut (only driver_id), so resolve them
   // from the roster the dispatcher already loads elsewhere.
   const driversQuery = useQuery({
@@ -96,23 +91,19 @@ export default function FleetStatusTable({
     return c;
   }, [rows]);
 
-  if (loading) {
-    return <Skeleton className="h-56 w-full rounded-[var(--radius-lg)]" />;
-  }
-
   return (
     <Card className="overflow-hidden">
-      <div className="px-4 py-3 border-b border-[var(--border)]">
-        <h2 className="text-sm font-semibold">Tình trạng đội xe</h2>
+      <div className="px-4 py-3 border-b border-line">
+        <h2 className="text-base font-semibold">Tình trạng đội xe</h2>
         <div className="flex flex-wrap gap-x-4 gap-y-1 mt-2">
           {PLACE_SUMMARY.map((s) => (
             <span
               key={s.place}
-              className="inline-flex items-center gap-1.5 text-[11px] text-[var(--text-tertiary)]"
+              className="inline-flex items-center gap-1.5 text-2xs text-faint"
             >
               {s.icon}
               {s.label}
-              <span className="tnum font-semibold text-[var(--text)]">
+              <span className="tnum font-semibold text-ink">
                 {counts[s.place]}
               </span>
             </span>
@@ -132,7 +123,7 @@ export default function FleetStatusTable({
         <div className="overflow-x-auto">
           <table className="w-full text-left border-collapse min-w-[640px]">
             <thead>
-              <tr className="text-[11px] text-[var(--text-tertiary)]">
+              <tr className="text-2xs text-faint">
                 <th scope="col" className="font-medium px-4 py-2">
                   Xe
                 </th>
@@ -157,30 +148,30 @@ export default function FleetStatusTable({
               {rows.map((r) => (
                 <tr
                   key={r.trip.id}
-                  className="border-t border-[var(--border)] hover:bg-[var(--surface-sunken)] transition-colors"
+                  className="border-t border-line hover:bg-sunken transition-colors"
                 >
-                  <td className="px-4 py-2.5 text-[13px] font-medium whitespace-nowrap">
+                  <td className="px-4 py-2.5 text-sm font-medium whitespace-nowrap">
                     {r.trip.vehicle_label ?? (
-                      <span className="text-[var(--text-tertiary)] font-normal">
+                      <span className="text-faint font-normal">
                         Chưa gán
                       </span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-[13px] whitespace-nowrap">
+                  <td className="px-4 py-2.5 text-sm whitespace-nowrap">
                     {r.driverName ?? (
-                      <span className="text-[var(--text-tertiary)]">Chưa gán</span>
+                      <span className="text-faint">Chưa gán</span>
                     )}
                   </td>
-                  <td className="px-4 py-2.5 text-[13px] whitespace-nowrap">
+                  <td className="px-4 py-2.5 text-sm whitespace-nowrap">
                     {r.direction ? DIRECTION[r.direction].short : "—"}
                   </td>
                   <td className="px-4 py-2.5">
                     <Badge tone={r.state.tone}>{r.state.label}</Badge>
                   </td>
-                  <td className="px-4 py-2.5 text-[13px] tnum whitespace-nowrap">
+                  <td className="px-4 py-2.5 text-sm tnum whitespace-nowrap">
                     {r.seats} chỗ
                   </td>
-                  <td className="px-4 py-2.5 text-[13px] tnum whitespace-nowrap text-[var(--text-secondary)]">
+                  <td className="px-4 py-2.5 text-sm tnum whitespace-nowrap text-muted">
                     {r.departsAt ? fmtTime(r.departsAt) : "—"}
                     {r.arrivesAt ? ` → ${fmtTime(r.arrivesAt)}` : ""}
                   </td>

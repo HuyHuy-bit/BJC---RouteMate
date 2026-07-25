@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { ArrowRight, Inbox, Lock, Trash2, Undo2 } from "lucide-react";
+import { ArrowRight, Filter, Inbox, Lock, Trash2, Undo2 } from "lucide-react";
 import type { BookingOut } from "../types";
 import { api } from "../lib/api";
 import { BOOKING_STATUS, DIRECTION, fmtDayLabel, fmtTime, fmtVnd } from "../lib/format";
@@ -7,20 +7,23 @@ import Badge from "./ui/Badge";
 import Button from "./ui/Button";
 import ConfirmDialog from "./ui/ConfirmDialog";
 import EmptyState from "./ui/EmptyState";
-import Skeleton from "./ui/Skeleton";
 import { useToast } from "./ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 
 export default function BookingsList({
   bookings,
-  loading,
+  filtered = false,
   onChanged,
   onAddBooking,
+  onClearFilter,
 }: {
   bookings: BookingOut[];
-  loading?: boolean;
+  /** True when a status filter is narrowing the list, so an empty
+   *  result means "none match" rather than "no customers at all". */
+  filtered?: boolean;
   onChanged: () => void;
   onAddBooking: () => void;
+  onClearFilter?: () => void;
 }) {
   const toast = useToast();
   const [pendingDelete, setPendingDelete] = useState<BookingOut | null>(null);
@@ -55,16 +58,24 @@ export default function BookingsList({
     }
   };
 
-  if (loading) {
-    return (
-      <div className="space-y-2 p-3">
-        <Skeleton className="h-[72px] w-full" count={3} />
-      </div>
-    );
-  }
-
   if (bookings.length === 0) {
-    return (
+    // An active filter hiding everything is a different situation from
+    // an empty queue, and offering "Thêm khách" for it would be a
+    // non-sequitur — the customers may well already be there.
+    return filtered ? (
+      <EmptyState
+        icon={<Filter size={18} aria-hidden="true" />}
+        title="Không có khách nào ở trạng thái này"
+        description="Bộ lọc đang thu hẹp danh sách. Bỏ lọc để xem toàn bộ hàng chờ."
+        action={
+          onClearFilter && (
+            <Button variant="secondary" size="sm" onClick={onClearFilter}>
+              Xem tất cả
+            </Button>
+          )
+        }
+      />
+    ) : (
       <EmptyState
         icon={<Inbox size={18} aria-hidden="true" />}
         title="Chưa có khách nào trong hàng chờ"
@@ -80,7 +91,7 @@ export default function BookingsList({
 
   return (
     <>
-      <ul className="divide-y divide-[var(--border)]">
+      <ul className="divide-y divide-line">
         {bookings.map((b) => {
           const status = BOOKING_STATUS[b.status];
           // Only a booking still sitting in a FORMING pool makes sense to
@@ -92,11 +103,11 @@ export default function BookingsList({
           return (
             <li
               key={b.id}
-              className="group flex items-start gap-3 px-4 py-3 hover:bg-[var(--surface-sunken)] transition-colors"
+              className="group flex items-start gap-3 px-4 py-3 hover:bg-sunken transition-colors"
             >
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="text-sm font-medium text-[var(--text)]">
+                  <span className="text-base font-medium text-ink">
                     {b.customer.full_name}
                   </span>
                   {b.is_private && (
@@ -111,17 +122,17 @@ export default function BookingsList({
                   <Badge tone={status.tone}>{status.label}</Badge>
                 </div>
 
-                <p className="text-xs text-[var(--text-secondary)] mt-1 flex items-center gap-1.5 min-w-0">
+                <p className="text-xs text-muted mt-1 flex items-center gap-1.5 min-w-0">
                   <span className="truncate">{b.pickup_address}</span>
                   <ArrowRight
                     size={11}
-                    className="shrink-0 text-[var(--text-tertiary)]"
+                    className="shrink-0 text-faint"
                     aria-hidden="true"
                   />
                   <span className="truncate">{b.dropoff_address}</span>
                 </p>
 
-                <p className="text-[11px] text-[var(--text-tertiary)] mt-1 flex items-center gap-2 flex-wrap">
+                <p className="text-2xs text-faint mt-1 flex items-center gap-2 flex-wrap">
                   <span className="tnum">
                     {fmtDayLabel(b.requested_pickup_at)} ·{" "}
                     {fmtTime(b.requested_pickup_at)}
@@ -131,33 +142,37 @@ export default function BookingsList({
                 </p>
               </div>
 
-              <div className="flex items-center gap-1 shrink-0">
-                <span className="text-sm font-medium tnum text-[var(--text)] mr-1">
+              {/* These controls used to be `opacity-0` until hover.
+                  Touch devices have no hover, so on the tablet a
+                  dispatcher keeps on the desk they were simply
+                  invisible — and at ~26x28px they were a poor target
+                  even once revealed. Now they are always present, in a
+                  quiet tone that lifts on hover, at 44px. */}
+              <div className="flex items-center gap-0.5 shrink-0">
+                <span className="text-base font-medium tnum text-ink mr-1.5">
                   {fmtVnd(b.price_vnd)}
                 </span>
 
                 {canUnassign && (
                   <Button
                     variant="ghost"
-                    size="sm"
                     onClick={() => handleUnassign(b)}
                     loading={unassigning === b.id}
                     aria-label={`Bỏ ${b.customer.full_name} khỏi chuyến`}
                     title="Đưa về hàng chờ để ghép lại"
-                    className="!px-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                    className="!w-touch !h-touch !px-0 text-faint hover:text-ink"
                   >
-                    <Undo2 size={14} aria-hidden="true" />
+                    <Undo2 size={16} aria-hidden="true" />
                   </Button>
                 )}
 
                 <Button
-                  variant="danger-subtle"
-                  size="sm"
+                  variant="ghost"
                   onClick={() => setPendingDelete(b)}
                   aria-label={`Xoá khách ${b.customer.full_name}`}
-                  className="!px-1.5 opacity-0 group-hover:opacity-100 focus-visible:opacity-100 transition-opacity"
+                  className="!w-touch !h-touch !px-0 text-faint hover:!text-danger hover:!bg-danger-subtle"
                 >
-                  <Trash2 size={14} aria-hidden="true" />
+                  <Trash2 size={16} aria-hidden="true" />
                 </Button>
               </div>
             </li>

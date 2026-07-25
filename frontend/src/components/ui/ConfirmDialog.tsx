@@ -1,10 +1,16 @@
-import { useEffect, useRef } from "react";
+import { useId, useRef } from "react";
 import Button from "./Button";
+import { useFocusTrap } from "../../lib/useFocusTrap";
 
 /**
  * Replaces window.confirm() for destructive actions. Native confirm
  * can't be styled, can't explain consequences properly, and reads
- * poorly to screen readers. This traps focus and closes on Escape.
+ * poorly to screen readers.
+ *
+ * Focus opens on Cancel, not Confirm. Every dialog using this deletes
+ * a customer, locks an employee out, or merges two trips — pre-focusing
+ * the destructive button means a stray Enter (or the Enter that
+ * submitted the form which opened this) carries it out.
  */
 export default function ConfirmDialog({
   open,
@@ -25,54 +31,65 @@ export default function ConfirmDialog({
   onConfirm: () => void;
   onCancel: () => void;
 }) {
-  const confirmRef = useRef<HTMLButtonElement>(null);
+  const titleId = useId();
+  const descId = useId();
+  const panelRef = useRef<HTMLDivElement>(null);
+  const cancelRef = useRef<HTMLButtonElement>(null);
 
-  useEffect(() => {
-    if (!open) return;
-    confirmRef.current?.focus();
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCancel();
-    };
-    document.addEventListener("keydown", onKey);
-    return () => document.removeEventListener("keydown", onKey);
-  }, [open, onCancel]);
+  useFocusTrap(open, panelRef, cancelRef);
 
   if (!open) return null;
 
   return (
     <div
-      className="fixed inset-0 z-[90] flex items-center justify-center p-4 animate-fade-in"
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="confirm-title"
+      className="fixed inset-0 z-dialog flex items-center justify-center p-4 animate-fade-in"
+      onKeyDown={(e) => {
+        // Scoped to the dialog rather than the document, so a nested
+        // popover can swallow its own Escape first.
+        if (e.key === "Escape" && !loading) {
+          e.stopPropagation();
+          onCancel();
+        }
+      }}
     >
       <div
-        className="absolute inset-0 bg-[rgba(16,23,40,0.4)]"
-        onClick={onCancel}
+        className="absolute inset-0 bg-scrim"
+        onClick={loading ? undefined : onCancel}
         aria-hidden="true"
       />
-      <div className="relative bg-[var(--surface)] rounded-[var(--radius-lg)] shadow-[var(--shadow-lg)] w-full max-w-sm p-5 animate-slide-up">
-        <h2
-          id="confirm-title"
-          className="text-base font-semibold text-[var(--text)]"
-        >
+      {/* aria-modal and the label live on the panel, not the fullscreen
+          wrapper — the wrapper contains the scrim, which is
+          aria-hidden, and nesting hidden content inside the dialog
+          node confuses assistive tech about the dialog's bounds. IDs
+          come from useId because two of these can be mounted on one
+          screen (EmployeesPage has deactivate and delete), and a
+          hardcoded id="confirm-title" would collide. */}
+      <div
+        ref={panelRef}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={description ? descId : undefined}
+        className="relative bg-surface rounded-lg shadow-lg w-full max-w-sm p-5 animate-slide-up"
+      >
+        <h2 id={titleId} className="text-lg font-semibold text-ink">
           {title}
         </h2>
         {description && (
-          <p className="text-sm text-[var(--text-secondary)] mt-2 leading-relaxed">
+          <p id={descId} className="text-base text-muted mt-2 leading-relaxed">
             {description}
           </p>
         )}
         <div className="flex gap-2 justify-end mt-5">
-          <Button variant="ghost" onClick={onCancel} disabled={loading}>
+          <Button
+            ref={cancelRef}
+            variant="ghost"
+            onClick={onCancel}
+            disabled={loading}
+          >
             {cancelLabel}
           </Button>
-          <Button
-            ref={confirmRef}
-            variant="danger"
-            onClick={onConfirm}
-            loading={loading}
-          >
+          <Button variant="danger" onClick={onConfirm} loading={loading}>
             {confirmLabel}
           </Button>
         </div>

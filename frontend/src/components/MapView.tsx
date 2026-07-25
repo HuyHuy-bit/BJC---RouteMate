@@ -2,20 +2,15 @@ import { useEffect, useRef } from "react";
 import goongjs from "@goongmaps/goong-js";
 import type { Map as GoongMap, Marker as GoongMarker } from "@goongmaps/goong-js";
 import "@goongmaps/goong-js/dist/goong-js.css";
+import { MAP_COLORS } from "../lib/mapColors";
 
 export interface Pin {
   lat: number;
   lng: number;
   /** Must be a literal color — Goong renders markers to a WebGL canvas,
-   *  which cannot resolve CSS custom properties. */
+   *  which cannot resolve CSS custom properties. See lib/mapColors. */
   color?: string;
 }
-
-/** Literal mirrors of the brand tokens, for canvas-rendered contexts. */
-export const MAP_COLORS = {
-  pickup: "#1b5fa8",
-  dropoff: "#d6331f",
-} as const;
 
 interface Props {
   pins: Pin[];
@@ -81,7 +76,7 @@ export default function MapView({ pins, zoom = 12, height = 200, className = "" 
   if (!MAPTILES_KEY) {
     return (
       <div
-        className={`flex items-center justify-center text-xs rounded-[var(--radius-md)] bg-[var(--surface-sunken)] border border-dashed border-[var(--border-strong)] text-[var(--text-tertiary)] ${className}`}
+        className={`flex items-center justify-center text-xs rounded-md bg-sunken border border-dashed border-line-strong text-faint ${className}`}
         style={{ height }}
       >
         Chưa cấu hình bản đồ
@@ -94,7 +89,7 @@ export default function MapView({ pins, zoom = 12, height = 200, className = "" 
       ref={containerRef}
       role="img"
       aria-label={`Bản đồ hiển thị ${pins.length} điểm`}
-      className={`rounded-[var(--radius-md)] overflow-hidden border border-[var(--border)] ${className}`}
+      className={`rounded-md overflow-hidden border border-line ${className}`}
       style={{ height }}
     />
   );

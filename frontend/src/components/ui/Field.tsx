@@ -25,7 +25,7 @@ const Field = forwardRef<HTMLInputElement, Props>(function Field(
     <div className={className}>
       <label
         htmlFor={id}
-        className="block text-[12px] font-medium mb-1.5 text-[var(--text-secondary)]"
+        className="block text-xs font-medium mb-1.5 text-muted"
       >
         {label}
       </label>
@@ -36,25 +36,25 @@ const Field = forwardRef<HTMLInputElement, Props>(function Field(
           aria-describedby={[hintId, errorId].filter(Boolean).join(" ") || undefined}
           aria-invalid={error ? true : undefined}
           className={[
-            "flex-1 h-9 px-3 text-sm rounded-[var(--radius)] bg-[var(--surface)]",
-            "border transition-colors duration-[var(--duration-fast)]",
-            "placeholder:text-[var(--text-tertiary)]",
+            "flex-1 h-9 px-3 text-base rounded bg-surface",
+            "border transition-colors duration-fast",
+            "placeholder:text-faint",
             error
-              ? "border-[var(--danger)]"
-              : "border-[var(--border-strong)] hover:border-[var(--text-tertiary)]",
-            "focus:border-[var(--border-focus)]",
+              ? "border-danger"
+              : "border-line-strong hover:border-faint",
+            "focus:border-line-focus",
           ].join(" ")}
           {...rest}
         />
         {trailing}
       </div>
       {error && (
-        <p id={errorId} className="mt-1.5 text-xs text-[var(--danger)]" role="alert">
+        <p id={errorId} className="mt-1.5 text-xs text-danger" role="alert">
           {error}
         </p>
       )}
       {hint && !error && (
-        <p id={hintId} className="mt-1.5 text-xs text-[var(--text-tertiary)]">
+        <p id={hintId} className="mt-1.5 text-xs text-faint">
           {hint}
         </p>
       )}

@@ -113,7 +113,7 @@ export default function CreateUserPage() {
           />
 
           <fieldset className="border-0 p-0 m-0">
-            <legend className="text-[12px] font-medium mb-2 text-[var(--text-secondary)]">
+            <legend className="text-xs font-medium mb-2 text-muted">
               Vai trò
             </legend>
             <div className="space-y-2">
@@ -124,25 +124,25 @@ export default function CreateUserPage() {
                   onClick={() => setRole(r.value)}
                   aria-pressed={role === r.value}
                   className={[
-                    "w-full text-left p-3 rounded-[var(--radius-md)] border flex items-start gap-3",
-                    "transition-all duration-[var(--duration-fast)]",
+                    "w-full text-left p-3 rounded-md border flex items-start gap-3",
+                    "transition-all duration-fast",
                     role === r.value
-                      ? "border-[var(--brand-blue)] bg-[var(--brand-blue-subtle)]"
-                      : "border-[var(--border-strong)] bg-[var(--surface)] hover:border-[var(--text-tertiary)]",
+                      ? "border-cobalt bg-cobalt-subtle"
+                      : "border-line-strong bg-surface hover:border-faint",
                   ].join(" ")}
                 >
                   <span
                     className={
                       role === r.value
-                        ? "text-[var(--brand-blue)] mt-0.5"
-                        : "text-[var(--text-tertiary)] mt-0.5"
+                        ? "text-cobalt mt-0.5"
+                        : "text-faint mt-0.5"
                     }
                   >
                     {r.icon}
                   </span>
                   <span>
-                    <span className="block text-sm font-medium">{r.label}</span>
-                    <span className="block text-xs text-[var(--text-tertiary)] mt-0.5">
+                    <span className="block text-base font-medium">{r.label}</span>
+                    <span className="block text-xs text-faint mt-0.5">
                       {r.description}
                     </span>
                   </span>
