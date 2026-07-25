@@ -54,6 +54,10 @@ class PoolMember:
     dropoff: Coord
     requested_pickup_at: datetime
     solo_duration_seconds: float
+    # Physical seats this booking occupies — a family travelling
+    # together is one member worth several seats. Defaults to 1 so
+    # every existing construction site stays correct.
+    seats: int = 1
 
 
 @dataclass
@@ -325,16 +329,30 @@ def evaluate_insertion(
     candidate: PoolMember,
     departure_deadline: datetime | None = None,
     now: datetime | None = None,
+    capacity: int = MAX_PASSENGERS,
 ) -> InsertionResult:
     """
     Evaluates adding `candidate` to a pool already holding `members`.
     Returns feasibility plus a 0..1 score where LOWER is better.
+
+    `capacity` is the seat count of the car this pool will actually
+    travel in, when that's already known (a trip with a reserved or
+    assigned vehicle). It defaults to MAX_PASSENGERS — the smallest
+    vehicle in the fleet — which is the right conservative assumption
+    while no specific car is committed yet: a pool built assuming a
+    bigger car might not fit the one it eventually gets.
     """
     now = _as_utc(now or datetime.now(timezone.utc))
 
     # ---- Stage 1: free rejects -------------------------------------
-    if len(members) >= MAX_PASSENGERS:
-        return InsertionResult(False, "pool is full")
+    # Seats, not member count — one booking can be a family of three.
+    occupied_seats = sum(m.seats for m in members)
+    if occupied_seats + candidate.seats > capacity:
+        return InsertionResult(
+            False,
+            f"not enough seats ({occupied_seats} of {capacity} taken, "
+            f"booking needs {candidate.seats})",
+        )
 
     for m in members:
         if not _windows_overlap(m.requested_pickup_at, candidate.requested_pickup_at):
@@ -410,11 +428,14 @@ def evaluate_insertion(
     )
     added_seconds = max(0.0, best_total - baseline_total)
 
-    occupancy_after = len(everyone)
+    # Seats filled, not bookings counted — a single 3-seat family
+    # booking fills a car far more than three separate 1-seat bookings
+    # would suggest by row count.
+    seats_after = sum(m.seats for m in everyone)
     # Prefer nearly-full vehicles: filling one car before opening a second
-    # is the primary business objective, so this term rewards higher
-    # occupancy most strongly.
-    occupancy_term = 1.0 - (occupancy_after - 1) / max(1, MAX_PASSENGERS - 1)
+    # is a real business objective (though see dispatch_config's weight
+    # comment for why it isn't weighted as heavily as it once was).
+    occupancy_term = 1.0 - (seats_after - 1) / max(1, capacity - 1)
 
     distance_term = min(1.0, added_seconds / (solo_baseline or 1.0))
     detour_term = min(1.0, worst_detour / MAX_PASSENGER_DETOUR_MINUTES)

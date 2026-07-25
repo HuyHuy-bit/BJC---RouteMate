@@ -58,10 +58,11 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         dropoff_point=_point(payload.dropoff_lat, payload.dropoff_lng),
         requested_pickup_at=payload.requested_pickup_at,
         is_private=payload.is_private,
+        seats=payload.seats,
         corridor_id=corridor.id,
         solo_duration_seconds=leg.duration_seconds,
         solo_distance_meters=leg.distance_meters,
-        price_vnd=price_for(corridor, payload.is_private),
+        price_vnd=price_for(corridor, payload.is_private, payload.seats),
         # Inferred automatically, not customer-supplied — see
         # app/services/geo.py:classify_direction. Direction is decided by
         # which way the passenger moves ALONG the corridor (comparing
@@ -112,6 +113,7 @@ def to_booking_out(booking: Booking) -> BookingOut:
         requested_pickup_at=booking.requested_pickup_at,
         direction=booking.direction,
         is_private=booking.is_private,
+        seats=booking.seats,
         price_vnd=booking.price_vnd,
         payment=PaymentOut.model_validate(booking.payment) if booking.payment else None,
         status=booking.status,

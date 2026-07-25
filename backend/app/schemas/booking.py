@@ -3,6 +3,7 @@ from datetime import datetime
 
 from pydantic import BaseModel, Field
 
+from app.core.dispatch_config import MAX_PASSENGERS
 from app.models.enums import BookingDirection, BookingStatus
 from app.schemas.customer import CustomerCreate, CustomerOut
 from app.schemas.payment import PaymentOut
@@ -21,6 +22,11 @@ class BookingCreate(BaseModel):
 
     requested_pickup_at: datetime
     is_private: bool = False
+    # Seats this one booking occupies (a family travelling together is
+    # ONE booking with several seats). Capped at MAX_PASSENGERS: a party
+    # bigger than the smallest car in the fleet can't be served as a
+    # single shared-ride booking at all.
+    seats: int = Field(default=1, ge=1, le=MAX_PASSENGERS)
     # direction is inferred server-side from pickup location, not
     # accepted from the client — see app/services/geo.py:classify_direction
 
@@ -40,6 +46,7 @@ class BookingOut(BaseModel):
     requested_pickup_at: datetime
     direction: BookingDirection
     is_private: bool
+    seats: int
     price_vnd: int
     status: BookingStatus
     trip_id: uuid.UUID | None

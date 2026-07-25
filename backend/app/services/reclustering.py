@@ -82,7 +82,10 @@ def cluster_by_proximity(members: list[PoolMember]) -> list[list[PoolMember]]:
     while remaining:
         group = [remaining.pop(0)]
 
-        while len(group) < MAX_PASSENGERS and remaining:
+        # Seats, not member count — evaluate_insertion enforces the same
+        # bound authoritatively below, this just stops looping once the
+        # car is physically full.
+        while sum(m.seats for m in group) < MAX_PASSENGERS and remaining:
             nearest_first = sorted(
                 range(len(remaining)),
                 key=lambda i: min(

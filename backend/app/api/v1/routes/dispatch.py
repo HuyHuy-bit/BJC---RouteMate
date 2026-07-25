@@ -7,7 +7,6 @@ from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Session, joinedload
 
 from app.api.deps import get_current_user, require_role
-from app.core.dispatch_config import MAX_PASSENGERS
 from app.db.session import get_db
 from app.models.booking import Booking
 from app.models.enums import (
@@ -40,6 +39,7 @@ from app.services.dispatch_service import (
     pool_snapshot,
     release_vehicle_if_free,
     run_dispatch_cycle,
+    trip_capacity,
 )
 from app.services.notification_service import notify_driver_assigned
 
@@ -256,7 +256,7 @@ def list_attention_items(
         if not active:
             continue
 
-        snap = pool_snapshot(trip)
+        snap = pool_snapshot(trip, db)
         decision = evaluate_pool(snap, now)
         overdue = (
             max(0.0, (now - trip.departure_deadline).total_seconds() / 60)
@@ -406,10 +406,14 @@ def forcemerge_trips(
 
     source_active = [b for b in source.bookings if b.status.value not in ("cancelled", "no_show")]
     target_active = [b for b in target.bookings if b.status.value not in ("cancelled", "no_show")]
-    if len(source_active) + len(target_active) > MAX_PASSENGERS:
+    # Seats, not booking rows — and against the target's real capacity,
+    # since that's the car the merged group actually travels in.
+    combined_seats = sum(b.seats or 1 for b in source_active + target_active)
+    capacity = trip_capacity(db, target)
+    if combined_seats > capacity:
         raise HTTPException(
             status_code=status.HTTP_409_CONFLICT,
-            detail=f"Combined would exceed {MAX_PASSENGERS} seats",
+            detail=f"Combined would need {combined_seats} seats, car holds {capacity}",
         )
 
     merge_trips(

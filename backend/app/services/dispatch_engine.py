@@ -53,6 +53,14 @@ class PoolSnapshot:
     earliest_requested_pickup: datetime
     created_at: datetime
     is_private: bool = False
+    # Physical seats occupied (one booking can be a family of several)
+    # and what the committed vehicle can actually hold. Kept distinct
+    # from passenger_count, which is a BOOKING count — "is this car
+    # full?" is a seat question, but "is this pool viable to run?" is a
+    # booking question, and conflating them was wrong in both
+    # directions. Defaults keep every existing construction site valid.
+    seat_count: int = 0
+    capacity: int = MAX_PASSENGERS
 
 
 @dataclass
@@ -97,9 +105,13 @@ def evaluate_pool(
     if pool.is_private:
         return DispatchDecision(pool.pool_id, SealDecision.SEAL, "private hire")
 
-    if pool.passenger_count >= MAX_PASSENGERS:
+    # Full is a SEAT question, not a booking-count one: two bookings of
+    # two seats each fill a 4-seat car just as completely as four solo
+    # riders do, and counting rows would have kept that car waiting for
+    # passengers it has no room for.
+    if pool.seat_count >= pool.capacity:
         return DispatchDecision(
-            pool.pool_id, SealDecision.SEAL, f"full ({MAX_PASSENGERS} passengers)"
+            pool.pool_id, SealDecision.SEAL, f"full ({pool.seat_count} seats)"
         )
 
     deadline = departure_deadline(pool, max_wait_minutes)
@@ -186,7 +198,10 @@ def find_merge_candidate(
             continue
         if other.is_private or lonely.is_private:
             continue
-        if other.passenger_count + lonely.passenger_count > MAX_PASSENGERS:
+        # Seats, not bookings — and against the smaller of the two
+        # pools' capacities, since the merged group has to fit whichever
+        # car actually ends up taking it.
+        if other.seat_count + lonely.seat_count > min(other.capacity, lonely.capacity):
             continue
 
         gap = abs(

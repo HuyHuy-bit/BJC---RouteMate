@@ -76,7 +76,44 @@ def _to_member(booking: Booking) -> PoolMember:
         dropoff=dropoff,
         requested_pickup_at=booking.requested_pickup_at,
         solo_duration_seconds=booking.solo_duration_seconds or 0.0,
+        seats=booking.seats or 1,
     )
+
+
+def active_bookings(trip: Trip) -> list[Booking]:
+    """Bookings still really on this trip — cancelled/no-show riders
+    are gone and must never count toward capacity or geometry."""
+    return [
+        b
+        for b in trip.bookings
+        if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+    ]
+
+
+def seats_taken(trip: Trip) -> int:
+    """Physical seats occupied on a trip. Sums each booking's own seat
+    count rather than counting rows — one booking can be a family."""
+    return sum(b.seats or 1 for b in active_bookings(trip))
+
+
+def trip_capacity(db: Session, trip: Trip) -> int:
+    """
+    How many seats this trip can actually hold.
+
+    Uses the committed vehicle's real seat_capacity when one is already
+    reserved or assigned (Vehicle.seat_capacity has existed all along
+    but nothing read it — matching always assumed the global constant,
+    so a 7-seat van could never be filled past 4). Falls back to
+    MAX_PASSENGERS, the smallest car in the fleet, while no specific
+    vehicle is committed: a pool built assuming a big van might not fit
+    the car it eventually gets, so the conservative bound is correct
+    until the real one is known.
+    """
+    if trip.vehicle_id is not None:
+        vehicle = db.get(Vehicle, trip.vehicle_id)
+        if vehicle is not None and vehicle.seat_capacity:
+            return vehicle.seat_capacity
+    return MAX_PASSENGERS
 
 
 def log_event(
@@ -279,13 +316,19 @@ def find_pool_for_booking(db: Session, booking: Booking) -> Trip | None:
             if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
             and b.id != booking.id
         ]
-        if len(members) >= MAX_PASSENGERS:
+        # Seats, not member count, against THIS trip's real capacity
+        # (the committed vehicle's, if it has one).
+        capacity = trip_capacity(db, trip)
+        if sum(m.seats for m in members) + candidate.seats > capacity:
             continue
         if any(m.solo_duration_seconds <= 0 for m in members):
             continue  # baseline missing; skip rather than compute garbage
 
         result = evaluate_insertion(
-            members, candidate, departure_deadline=trip.departure_deadline
+            members,
+            candidate,
+            departure_deadline=trip.departure_deadline,
+            capacity=capacity,
         )
         if result.feasible and result.score is not None and result.score < best_score:
             best_trip, best_score = trip, result.score
@@ -476,12 +519,8 @@ def assign_booking(db: Session, booking: Booking) -> Trip:
     return trip
 
 
-def pool_snapshot(trip: Trip) -> PoolSnapshot:
-    active = [
-        b
-        for b in trip.bookings
-        if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
-    ]
+def pool_snapshot(trip: Trip, db: Session | None = None) -> PoolSnapshot:
+    active = active_bookings(trip)
     earliest = (
         min(b.requested_pickup_at for b in active) if active else trip.created_at
     )
@@ -494,6 +533,8 @@ def pool_snapshot(trip: Trip) -> PoolSnapshot:
         earliest_requested_pickup=earliest,
         created_at=trip.created_at,
         is_private=any(b.is_private for b in active),
+        seat_count=sum(b.seats or 1 for b in active),
+        capacity=trip_capacity(db, trip) if db is not None else MAX_PASSENGERS,
     )
 
 
@@ -510,20 +551,28 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
     # reservation (the reserved vehicle isn't `available` yet — it's
     # still `on_trip` on its outbound leg — so a fresh search would skip
     # right past it) and hand the trip an unrelated vehicle.
+    required_seats = seats_taken(trip)
+
     if trip.vehicle_id is not None:
         reserved = db.get(Vehicle, trip.vehicle_id)
-        if reserved is not None and reserved.status in (
-            VehicleStatus.available,
-            VehicleStatus.on_trip,
+        if (
+            reserved is not None
+            and reserved.status
+            in (VehicleStatus.available, VehicleStatus.on_trip)
+            # A reservation made when the pool was smaller must still
+            # actually fit it now — pools keep accreting bookings after
+            # a vehicle is earmarked (find_returning_vehicle reserves at
+            # pool-creation time), so this can genuinely outgrow the car.
+            and reserved.seat_capacity >= required_seats
         ):
             trip.vehicle_label = reserved.label or reserved.plate_number
             if trip.driver_id is None and reserved.default_driver_id:
                 trip.driver_id = reserved.default_driver_id
             reserved.status = VehicleStatus.on_trip
             return reserved
-        # Reservation no longer usable (e.g. pulled into maintenance
-        # since being earmarked) — fall through to a fresh search rather
-        # than blocking this trip's departure entirely.
+        # Reservation no longer usable (pulled into maintenance since
+        # being earmarked, or the pool outgrew it) — fall through to a
+        # fresh search rather than blocking this trip's departure.
         trip.vehicle_id = None
 
     # Used to be "whichever available vehicle the database happens to
@@ -538,7 +587,14 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
     # VEHICLE_LOCATION_STALE_MINUTES is treated identically to no ping at
     # all: a phone that stopped reporting an hour ago is not still
     # telling the truth about where the car is.
-    base_query = select(Vehicle).where(Vehicle.status == VehicleStatus.available)
+    base_query = (
+        select(Vehicle)
+        .where(Vehicle.status == VehicleStatus.available)
+        # Must physically seat everyone already in this pool. Without
+        # this, a 4-seat pool could be handed a car too small for it and
+        # only fail later at the database's capacity trigger.
+        .where(Vehicle.seat_capacity >= required_seats)
+    )
     if trip.centroid is not None:
         stale_cutoff = datetime.now(timezone.utc) - timedelta(
             minutes=VEHICLE_LOCATION_STALE_MINUTES
@@ -841,7 +897,7 @@ def recluster_forming_pools(db: Session, now: datetime) -> int:
         if (
             len(group_trips) == 1
             and len(time_clusters) == 1
-            and len(all_bookings) <= MAX_PASSENGERS
+            and sum(b.seats or 1 for b in all_bookings) <= MAX_PASSENGERS
         ):
             continue
 
@@ -1101,7 +1157,7 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
         .scalars()
         .all()
     )
-    snapshots = {t.id: pool_snapshot(t) for t in trips}
+    snapshots = {t.id: pool_snapshot(t, db) for t in trips}
 
     sealed = escalated = merged = 0
     no_vehicle = 0

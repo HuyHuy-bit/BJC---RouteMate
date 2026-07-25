@@ -59,6 +59,14 @@ class Booking(Base, TimestampMixin):
 
     is_private: Mapped[bool] = mapped_column(Boolean, default=False)
     price_vnd: Mapped[int] = mapped_column(Integer, default=0)
+
+    # How many physical seats this ONE booking occupies — a parent
+    # booking for themselves plus two children is one booking worth
+    # three seats, not three bookings. Capacity everywhere sums this
+    # rather than counting booking rows (which silently treated that
+    # family as a single passenger and would overfill the car).
+    seats: Mapped[int] = mapped_column(Integer, default=1, server_default="1")
+
     requested_pickup_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
     direction: Mapped[BookingDirection] = mapped_column(
         Enum(

@@ -51,3 +51,19 @@ def test_different_corridors_can_have_different_flat_rates():
     )
     assert price_for(CORRIDOR, is_private=False) == 150_000
     assert price_for(other, is_private=False) == 200_000
+
+
+def test_shared_fare_is_charged_per_seat():
+    # A family booking three seats pays three fares — those seats would
+    # otherwise have been sold individually at the same flat rate.
+    assert price_for(CORRIDOR, is_private=False, seats=1) == 150_000
+    assert price_for(CORRIDOR, is_private=False, seats=2) == 300_000
+    assert price_for(CORRIDOR, is_private=False, seats=3) == 450_000
+
+
+def test_private_hire_price_does_not_multiply_by_seats():
+    # Bao xe buys the whole car; how many people ride in it is the
+    # customer's business, not another 4x on top.
+    whole_car = 150_000 * PRIVATE_MULTIPLIER
+    assert price_for(CORRIDOR, is_private=True, seats=1) == whole_car
+    assert price_for(CORRIDOR, is_private=True, seats=4) == whole_car

@@ -142,7 +142,10 @@ export default function TripsPanel({
                 </>
               ) : (
                 <>
-                  <Users size={11} aria-hidden="true" /> {trip.bookings.length}/4 chỗ
+                  {/* Seats, not booking count — one booking can be a
+                      family of several. */}
+                  <Users size={11} aria-hidden="true" />{" "}
+                  {trip.bookings.reduce((n, b) => n + (b.seats ?? 1), 0)}/4 chỗ
                 </>
               )}
             </p>

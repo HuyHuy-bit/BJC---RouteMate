@@ -23,6 +23,20 @@ from app.models.corridor import Corridor
 PRIVATE_MULTIPLIER = 4
 
 
-def price_for(corridor: Corridor, is_private: bool) -> int:
-    shared = corridor.base_fare_vnd
-    return shared * PRIVATE_MULTIPLIER if is_private else shared
+def price_for(corridor: Corridor, is_private: bool, seats: int = 1) -> int:
+    """
+    The flat corridor fare, per SEAT for a shared ride.
+
+    A booking covering several seats (a family travelling together) pays
+    per seat, because those seats would otherwise have been sold
+    individually at the same flat rate — one fare for a party of three
+    would give away two seats' worth of revenue on every family booking.
+
+    A private hire (bao xe) is the exception: it's priced as the whole
+    car (PRIVATE_MULTIPLIER × the flat fare) regardless of how many
+    people actually travel in it, so seats deliberately does NOT
+    multiply there — you're buying the vehicle, not the seats.
+    """
+    if is_private:
+        return corridor.base_fare_vnd * PRIVATE_MULTIPLIER
+    return corridor.base_fare_vnd * seats

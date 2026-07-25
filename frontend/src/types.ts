@@ -64,6 +64,7 @@ export interface BookingCreate {
   dropoff_lng: number;
   requested_pickup_at: string;
   is_private: boolean;
+  seats?: number;
 }
 
 export type PaymentMethod = "cash" | "bank_transfer" | "other";
@@ -99,6 +100,7 @@ export interface BookingOut {
   requested_pickup_at: string;
   direction: BookingDirection;
   is_private: boolean;
+  seats: number;
   price_vnd: number;
   status: BookingStatus;
   trip_id: string | null;

@@ -105,6 +105,9 @@ export default function BookingsList({
                       Bao xe
                     </Badge>
                   )}
+                  {!b.is_private && b.seats > 1 && (
+                    <Badge tone="neutral">{b.seats} chỗ</Badge>
+                  )}
                   <Badge tone={status.tone}>{status.label}</Badge>
                 </div>
 

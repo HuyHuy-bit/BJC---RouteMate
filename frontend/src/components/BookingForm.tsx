@@ -26,6 +26,7 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
   const [dropoff, setDropoff] = useState<GeocodeResult | null>(null);
   const [pickupAt, setPickupAt] = useState(defaultDateTimeLocal());
   const [isPrivate, setIsPrivate] = useState(false);
+  const [seats, setSeats] = useState(1);
   const [submitting, setSubmitting] = useState(false);
 
   const canSubmit = Boolean(
@@ -51,6 +52,9 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
         dropoff_lng: dropoff.lng,
         requested_pickup_at: new Date(pickupAt).toISOString(),
         is_private: isPrivate,
+        // A private hire books the whole car regardless of headcount,
+        // so seats only means something for a shared ride.
+        seats: isPrivate ? 1 : seats,
       });
       toast(`Đã thêm khách ${fullName.trim()}.`, "success");
       setFullName("");
@@ -59,6 +63,7 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
       setDropoff(null);
       setPickupAt(defaultDateTimeLocal());
       setIsPrivate(false);
+      setSeats(1);
       onCreated();
     } catch (err: any) {
       toast(
@@ -166,6 +171,40 @@ export default function BookingForm({ onCreated }: { onCreated: () => void }) {
           />
         </div>
       </fieldset>
+
+      {/* Seats only matter for a shared ride — a private hire is the
+          whole car however many people travel in it. */}
+      {!isPrivate && (
+        <fieldset className="border-0 p-0 m-0">
+          <legend className="text-[12px] font-medium mb-2 text-[var(--text-secondary)]">
+            Số khách đi cùng
+          </legend>
+          <div className="flex items-center gap-2">
+            {[1, 2, 3, 4].map((n) => (
+              <button
+                key={n}
+                type="button"
+                aria-pressed={seats === n}
+                onClick={() => setSeats(n)}
+                className={[
+                  "w-10 h-10 rounded-[var(--radius)] text-sm font-medium tnum transition-colors",
+                  "border",
+                  seats === n
+                    ? "bg-[var(--surface-inverse)] text-white border-transparent"
+                    : "bg-[var(--surface)] text-[var(--text-secondary)] border-[var(--border-strong)] hover:bg-[var(--surface-sunken)]",
+                ].join(" ")}
+              >
+                {n}
+              </button>
+            ))}
+            <span className="text-xs text-[var(--text-tertiary)] ml-1">
+              {seats > 1
+                ? `${seats} chỗ trên cùng một xe`
+                : "1 chỗ"}
+            </span>
+          </div>
+        </fieldset>
+      )}
 
       <div className="flex justify-end pt-1">
         <Button
