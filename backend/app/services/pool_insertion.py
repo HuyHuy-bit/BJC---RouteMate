@@ -74,9 +74,7 @@ class InsertionResult:
     score: float | None = None
     ordered_stops: list[Stop] | None = None
     total_duration_seconds: float = 0.0
-    total_distance_meters: float = 0.0
     worst_detour_minutes: float = 0.0
-    is_estimate: bool = False
     # Cumulative seconds from route start to each booking's pickup and
     # dropoff, keyed booking_id -> {"pickup": x, "dropoff": y}. This is
     # what makes real per-stop ETAs possible: the old _apply_etas split
@@ -314,8 +312,55 @@ def best_ordering_from_position(
     return total, ordered_stops, offsets
 
 
-def _leg_lookup(coords: list[Coord]) -> dict[tuple[int, int], float]:
-    """One batched matrix call covering every stop-to-stop pair."""
+LegCache = dict[tuple[Coord, Coord], float]
+
+
+def build_leg_cache(coords: list[Coord]) -> LegCache:
+    """
+    One matrix call covering every pair among `coords`, keyed by the
+    COORDINATES themselves rather than by position.
+
+    Position-keyed lookups can't be shared between calls — each
+    evaluate_insertion builds its own coords list, so index 3 means
+    something different every time. Keying by coordinate makes one fetch
+    reusable across every insertion evaluated within a dispatch group
+    (see dispatch_service.recluster_forming_pools), turning a per-
+    candidate-per-group API cost into one call for the whole group.
+    """
+    matrix = routing_service.matrix(coords, coords)
+    return {
+        (a, b): matrix[i][j].duration_seconds
+        for i, a in enumerate(coords)
+        for j, b in enumerate(coords)
+    }
+
+
+def _leg_lookup(
+    coords: list[Coord], leg_cache: LegCache | None = None
+) -> dict[tuple[int, int], float]:
+    """
+    Position-keyed stop-to-stop durations for one evaluation.
+
+    Served from `leg_cache` when every needed pair is already in it —
+    zero API calls. Any gap falls back to a live batched fetch rather
+    than guessing, so a partial or stale cache degrades to the old
+    behavior instead of producing wrong numbers.
+    """
+    if leg_cache is not None:
+        lookup: dict[tuple[int, int], float] = {}
+        complete = True
+        for i, a in enumerate(coords):
+            for j, b in enumerate(coords):
+                hit = leg_cache.get((a, b))
+                if hit is None:
+                    complete = False
+                    break
+                lookup[(i, j)] = hit
+            if not complete:
+                break
+        if complete:
+            return lookup
+
     matrix = routing_service.matrix(coords, coords)
     return {
         (i, j): matrix[i][j].duration_seconds
@@ -330,6 +375,7 @@ def evaluate_insertion(
     departure_deadline: datetime | None = None,
     now: datetime | None = None,
     capacity: int = MAX_PASSENGERS,
+    leg_cache: LegCache | None = None,
 ) -> InsertionResult:
     """
     Evaluates adding `candidate` to a pool already holding `members`.
@@ -341,6 +387,11 @@ def evaluate_insertion(
     vehicle in the fleet — which is the right conservative assumption
     while no specific car is committed yet: a pool built assuming a
     bigger car might not fit the one it eventually gets.
+
+    `leg_cache` is a coordinate-keyed leg-duration table covering every
+    stop this call could need (see build_leg_cache). Supplying one makes
+    this evaluation free of routing API calls; omitting it fetches as
+    before.
     """
     now = _as_utc(now or datetime.now(timezone.utc))
 
@@ -378,7 +429,7 @@ def evaluate_insertion(
         index[(m.booking_id, "dropoff")] = len(coords)
         coords.append(m.dropoff)
 
-    durations = _leg_lookup(coords)
+    durations = _leg_lookup(coords, leg_cache)
 
     # Anchor for the schedule-window check below — the promise belongs
     # to whoever in this candidate route has been waiting longest,
@@ -420,8 +471,12 @@ def evaluate_insertion(
         return InsertionResult(False, "pool route too long overall")
 
     # ---- Stage 4: score (lower is better) --------------------------
-    route = routing_service.route([s.coord for s in best_order])
-
+    # No Directions call here on purpose. This used to fetch the full
+    # route geometry just to populate total_distance_meters/is_estimate
+    # on the result — fields no caller ever read (every consumer uses
+    # feasible/score/reason only), at the cost of one API request per
+    # candidate evaluated. The trip's real geometry is fetched once when
+    # it's actually committed, in _refresh_pool_geometry.
     solo_baseline = candidate.solo_duration_seconds
     baseline_total, _baseline_order, baseline_offsets = _best_ordering(
         members, durations, index, trip_start
@@ -470,9 +525,7 @@ def evaluate_insertion(
         score=score,
         ordered_stops=best_order,
         total_duration_seconds=best_total,
-        total_distance_meters=route.total_distance_meters,
         worst_detour_minutes=worst_detour,
-        is_estimate=route.is_estimate,
         stop_offsets_seconds=offsets,
     )
 

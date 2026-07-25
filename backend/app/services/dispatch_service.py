@@ -25,6 +25,7 @@ from app.core.dispatch_config import (
     VEHICLE_LOCATION_STALE_MINUTES,
 )
 from app.models.booking import Booking
+from app.models.corridor import Corridor
 from app.models.dispatch_event import DispatchEvent
 from app.models.enums import (
     BookingDirection,
@@ -46,6 +47,7 @@ from app.services.pool_insertion import (
     PoolMember,
     _as_utc,
     best_ordering_from_position,
+    build_leg_cache,
     compute_solo_baseline,
     evaluate_insertion,
     solve_group_ordering,
@@ -901,10 +903,23 @@ def recluster_forming_pools(db: Session, now: datetime) -> int:
         ):
             continue
 
+        # ONE matrix call covering every stop in this (corridor,
+        # direction) group, shared by every insertion evaluated below.
+        # Previously each candidate-into-group evaluation fetched its
+        # own matrix, so a tick's routing cost scaled with
+        # groups × candidates; now it's one fetch per group regardless
+        # of how many candidates get tried.
+        corridor = db.get(Corridor, corridor_id)
+        group_coords: list[tuple[float, float]] = []
+        for m in members:
+            group_coords.append(m.pickup)
+            group_coords.append(m.dropoff)
+        leg_cache = build_leg_cache(group_coords) if group_coords else None
+
         new_groups = [
             {m.booking_id for m in g}
             for cluster in time_clusters
-            for g in cluster_by_proximity(cluster)
+            for g in cluster_by_proximity(cluster, corridor, leg_cache)
         ]
 
         current_groups = {

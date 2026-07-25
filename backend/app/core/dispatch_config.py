@@ -10,6 +10,16 @@ profile can override them wholesale later.
 # single source of truth for capacity across matching and dispatch.
 MAX_PASSENGERS = 4
 
+# --- Routing provider limits ---
+# Goong's Distance Matrix rejects any request above this many
+# origin x destination elements with a bare HTTP 400. Verified
+# empirically against the live API: 10x10 (100) succeeds, 11x11 (121)
+# does not. RoutingService.matrix chunks larger requests rather than
+# letting them fail — a failed matrix silently degrades every pair in
+# it to straight-line estimates, which is far worse than issuing two
+# requests.
+MATRIX_MAX_ELEMENTS = 100
+
 # --- Vehicle position ---
 # A Vehicle.last_location_at older than this is treated the same as "no
 # location at all" (sorted last, never excluded) when picking the

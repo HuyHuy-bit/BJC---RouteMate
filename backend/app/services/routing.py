@@ -36,6 +36,7 @@ from app.core.dispatch_config import (
     CIRCUIT_FAILURE_THRESHOLD,
     CIRCUIT_RESET_SECONDS,
     FALLBACK_SPEED_KMH,
+    MATRIX_MAX_ELEMENTS,
     ROUTE_CACHE_TTL_SECONDS,
     ROUTING_MAX_RETRIES,
     ROUTING_TIMEOUT_SECONDS,
@@ -244,6 +245,40 @@ class RoutingService:
     # ---------- upstream calls ----------
 
     def _fetch_matrix(
+        self, origins: list[Coord], destinations: list[Coord]
+    ) -> list[list[Leg]]:
+        """
+        Full origins x destinations matrix, split into provider-sized
+        requests when necessary and reassembled.
+
+        Goong rejects any request over MATRIX_MAX_ELEMENTS with a bare
+        400 (verified empirically: 10x10 succeeds, 11x11 does not). A
+        caller batching a whole dispatch group can easily exceed that,
+        and the failure mode was silent and expensive — the request
+        would fail, the circuit breaker would count it, and EVERY pair
+        in the group would quietly fall back to straight-line estimates.
+        Chunking here means callers can ask for whatever they need
+        without knowing the provider's limit, which is exactly the kind
+        of concern this gateway exists to own.
+        """
+        if len(origins) * len(destinations) <= MATRIX_MAX_ELEMENTS:
+            return self._fetch_matrix_chunk(origins, destinations)
+
+        # Square-ish chunks keep the number of requests near the minimum
+        # for a given element budget.
+        side = max(1, int(MATRIX_MAX_ELEMENTS**0.5))
+        out: list[list[Leg]] = [[None] * len(destinations) for _ in origins]  # type: ignore[list-item]
+        for oi in range(0, len(origins), side):
+            o_chunk = origins[oi : oi + side]
+            for di in range(0, len(destinations), side):
+                d_chunk = destinations[di : di + side]
+                block = self._fetch_matrix_chunk(o_chunk, d_chunk)
+                for r, row in enumerate(block):
+                    for c, leg in enumerate(row):
+                        out[oi + r][di + c] = leg
+        return out
+
+    def _fetch_matrix_chunk(
         self, origins: list[Coord], destinations: list[Coord]
     ) -> list[list[Leg]]:
         params = {
