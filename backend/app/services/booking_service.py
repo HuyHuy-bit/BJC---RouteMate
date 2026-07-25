@@ -111,6 +111,8 @@ def to_booking_out(booking: Booking) -> BookingOut:
         dropoff_lat=dropoff_shape.y,
         dropoff_lng=dropoff_shape.x,
         requested_pickup_at=booking.requested_pickup_at,
+        estimated_pickup_at=booking.estimated_pickup_at,
+        estimated_dropoff_at=booking.estimated_dropoff_at,
         direction=booking.direction,
         is_private=booking.is_private,
         seats=booking.seats,

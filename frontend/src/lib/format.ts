@@ -96,3 +96,47 @@ export const NEXT_TRIP_ACTION: Partial<
   assigned: { label: "Bắt đầu chuyến", next: "in_progress" },
   in_progress: { label: "Hoàn thành chuyến", next: "completed" },
 };
+
+/**
+ * Where a car physically is right now, derived from its trip state.
+ *
+ * There's no live GPS feed driving this — it reads the two things that
+ * genuinely determine a car's whereabouts operationally: which way it's
+ * going, and how far through the trip lifecycle it is. A trip that
+ * hasn't departed is still at its origin hub; one in progress is on the
+ * road between hubs; a finished one is at its destination. That's
+ * exactly the "at Bắc Giang / at Hà Nội / running" picture a dispatcher
+ * needs to see at a glance.
+ *
+ * `place` is the coarse bucket used for the summary counts; `label` is
+ * what the operator reads.
+ */
+export type FleetPlace = "bac_giang" | "ha_noi" | "running" | "issue";
+
+export function tripLocationState(
+  status: TripStatus,
+  direction: BookingDirection | undefined
+): { place: FleetPlace; label: string; tone: Tone } {
+  // Outbound leaves Bắc Giang for Hà Nội; return is the reverse.
+  const origin: FleetPlace = direction === "return" ? "ha_noi" : "bac_giang";
+  const destination: FleetPlace = direction === "return" ? "bac_giang" : "ha_noi";
+  const originName = origin === "ha_noi" ? "Hà Nội" : "Bắc Giang";
+  const destName = destination === "ha_noi" ? "Hà Nội" : "Bắc Giang";
+
+  switch (status) {
+    case "forming":
+      return { place: origin, label: `Gom khách tại ${originName}`, tone: "neutral" };
+    case "sealed":
+      return { place: origin, label: `Chờ xe tại ${originName}`, tone: "warning" };
+    case "assigned":
+      return { place: origin, label: `Sắp khởi hành từ ${originName}`, tone: "info" };
+    case "in_progress":
+      return { place: "running", label: `Đang chạy → ${destName}`, tone: "warning" };
+    case "completed":
+      return { place: destination, label: `Đã đến ${destName}`, tone: "success" };
+    case "reassigning":
+      return { place: "issue", label: "Sự cố — chờ xe thay thế", tone: "danger" };
+    case "cancelled":
+      return { place: "issue", label: "Đã huỷ", tone: "danger" };
+  }
+}

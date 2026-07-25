@@ -44,6 +44,11 @@ class BookingOut(BaseModel):
     dropoff_lng: float
 
     requested_pickup_at: datetime
+    # Real per-stop estimates from the committed route (see
+    # pool_insertion._best_ordering) — null until the pool seals and a
+    # route is actually solved.
+    estimated_pickup_at: datetime | None
+    estimated_dropoff_at: datetime | None
     direction: BookingDirection
     is_private: bool
     seats: int

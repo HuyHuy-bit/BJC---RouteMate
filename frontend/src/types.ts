@@ -98,6 +98,8 @@ export interface BookingOut {
   dropoff_lat: number;
   dropoff_lng: number;
   requested_pickup_at: string;
+  estimated_pickup_at: string | null;
+  estimated_dropoff_at: string | null;
   direction: BookingDirection;
   is_private: boolean;
   seats: number;

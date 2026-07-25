@@ -8,6 +8,7 @@ import AppShell from "../components/layout/AppShell";
 import AttentionPanel from "../components/AttentionPanel";
 import BookingForm from "../components/BookingForm";
 import BookingsList from "../components/BookingsList";
+import FleetStatusTable from "../components/FleetStatusTable";
 import TripsPanel from "../components/TripsPanel";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -140,6 +141,13 @@ export default function DispatchBoard() {
       </div>
 
       <AttentionPanel />
+
+      {/* Where every active car is right now — the operational
+          "at Bắc Giang / at Hà Nội / running" picture, above the
+          per-pool detail below. */}
+      <div className="mb-6">
+        <FleetStatusTable trips={trips} loading={tripsQuery.isLoading} />
+      </div>
 
       <div className="grid lg:grid-cols-[minmax(0,420px)_minmax(0,1fr)] gap-5 items-start">
         {/* Queue */}
