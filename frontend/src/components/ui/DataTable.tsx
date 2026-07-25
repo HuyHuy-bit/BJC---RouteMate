@@ -1,3 +1,4 @@
+import { ChevronRight } from "lucide-react";
 import type { ReactNode } from "react";
 
 export interface Column<T> {
@@ -33,6 +34,8 @@ export default function DataTable<T>({
   minWidth = 640,
   showTotals = false,
   totalsLabel = "Tổng",
+  onRowClick,
+  rowActionLabel,
 }: {
   columns: Column<T>[];
   rows: T[];
@@ -42,7 +45,20 @@ export default function DataTable<T>({
   minWidth?: number;
   showTotals?: boolean;
   totalsLabel?: string;
+  /**
+   * Opens the row's detail view. Clicking anywhere on the row triggers
+   * this, but that is a mouse affordance only — the real control is the
+   * button rendered in the trailing column, which is what keyboard and
+   * screen reader users reach. A <tr> cannot be made properly
+   * focusable or announced as a control, so putting the semantics on a
+   * button and treating the row click as a shortcut is the honest way
+   * round rather than bolting role="button" onto a table row.
+   */
+  onRowClick?: (row: T) => void;
+  /** Accessible name for that button, e.g. "Chi tiết chuyến 98A-12345". */
+  rowActionLabel?: (row: T) => string;
 }) {
+  const interactive = Boolean(onRowClick);
   return (
     <div className="overflow-x-auto">
       <table
@@ -65,13 +81,22 @@ export default function DataTable<T>({
                 {c.header}
               </th>
             ))}
+            {interactive && (
+              <th scope="col" className="w-touch px-2 py-2">
+                <span className="sr-only">Xem chi tiết</span>
+              </th>
+            )}
           </tr>
         </thead>
         <tbody>
           {rows.map((row) => (
             <tr
               key={rowKey(row)}
-              className="border-t border-line hover:bg-sunken transition-colors"
+              onClick={onRowClick ? () => onRowClick(row) : undefined}
+              className={[
+                "border-t border-line hover:bg-sunken transition-colors",
+                interactive ? "cursor-pointer" : "",
+              ].join(" ")}
             >
               {columns.map((c) => (
                 <td
@@ -85,6 +110,23 @@ export default function DataTable<T>({
                   {c.cell(row)}
                 </td>
               ))}
+              {interactive && (
+                <td className="px-2 py-1.5 text-right">
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      // The row handler would otherwise fire a second
+                      // time for the same click.
+                      e.stopPropagation();
+                      onRowClick?.(row);
+                    }}
+                    aria-label={rowActionLabel?.(row) ?? "Xem chi tiết"}
+                    className="w-touch h-touch inline-flex items-center justify-center rounded text-faint hover:text-ink hover:bg-sunken transition-colors"
+                  >
+                    <ChevronRight size={16} aria-hidden="true" />
+                  </button>
+                </td>
+              )}
             </tr>
           ))}
         </tbody>
@@ -103,6 +145,7 @@ export default function DataTable<T>({
                   {c.total ?? (i === 0 ? totalsLabel : null)}
                 </td>
               ))}
+              {interactive && <td aria-hidden="true" />}
             </tr>
           </tfoot>
         )}

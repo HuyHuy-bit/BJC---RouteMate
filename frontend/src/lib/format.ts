@@ -2,6 +2,7 @@ import type {
   BookingOut,
   BookingStatus,
   BookingDirection,
+  PaymentStatus,
   TripOut,
   TripStatus,
   VehicleStatus,
@@ -116,6 +117,16 @@ export const TRIP_STATUS: Record<TripStatus, { label: string; tone: Tone }> = {
   completed: { label: "Hoàn thành", tone: "success" },
   cancelled: { label: "Đã huỷ", tone: "danger" },
   reassigning: { label: "Đang đổi xe", tone: "danger" },
+};
+
+export const PAYMENT_STATUS: Record<
+  PaymentStatus,
+  { label: string; tone: Tone }
+> = {
+  pending: { label: "Chưa thu", tone: "warning" },
+  collected: { label: "Đã thu tiền", tone: "success" },
+  disputed: { label: "Thiếu tiền", tone: "danger" },
+  waived: { label: "Đã miễn", tone: "neutral" },
 };
 
 export const ROLE_LABEL: Record<string, string> = {

@@ -14,6 +14,7 @@ import {
   tripIdentity,
 } from "../lib/format";
 import AppShell from "../components/layout/AppShell";
+import TripDetail from "../components/TripDetail";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
 import Card from "../components/ui/Card";
@@ -22,6 +23,7 @@ import EmptyState from "../components/ui/EmptyState";
 import QueryState from "../components/ui/QueryState";
 import Select from "../components/ui/Select";
 import Skeleton from "../components/ui/Skeleton";
+import SlideOver from "../components/ui/SlideOver";
 
 /**
  * How far back to show by default.
@@ -49,10 +51,32 @@ export default function HistoryPage() {
   const [range, setRange] = useState("30");
   const [query, setQuery] = useState("");
   const [page, setPage] = useState(0);
+  const [selected, setSelected] = useState<TripOut | null>(null);
 
   const historyQuery = useQuery({
     queryKey: ["history", isDriver ? "mine" : "all"],
     queryFn: () => (isDriver ? api.dispatch.myHistory() : api.dispatch.history()),
+  });
+
+  // TripOut carries only driver_id and vehicle_id, so the detail panel
+  // needs both rosters to name them. Fetched lazily — no reason to load
+  // either until someone opens a ride.
+  //
+  // Skipped entirely for drivers: GET /users and GET /vehicles are both
+  // require_role(admin, dispatcher), so asking would just earn two 403s
+  // per opened row. A driver doesn't need the roster anyway — they drove
+  // the trip, so their own account names the driver, and the trip record
+  // carries the vehicle label.
+  const canReadRosters = !isDriver && selected !== null;
+  const driversQuery = useQuery({
+    queryKey: ["drivers"],
+    queryFn: () => api.users.list("driver"),
+    enabled: canReadRosters,
+  });
+  const vehiclesQuery = useQuery({
+    queryKey: ["vehicles"],
+    queryFn: () => api.vehicles.list(),
+    enabled: canReadRosters,
   });
 
   const filtered = useMemo(() => {
@@ -263,6 +287,8 @@ export default function HistoryPage() {
                   minWidth={860}
                   showTotals
                   totalsLabel={`${filtered.length} chuyến`}
+                  onRowClick={setSelected}
+                  rowActionLabel={(t) => `Chi tiết chuyến ${tripIdentity(t)}`}
                 />
 
                 {pageCount > 1 && (
@@ -299,6 +325,29 @@ export default function HistoryPage() {
           </Card>
         )}
       </QueryState>
+
+      <SlideOver
+        open={selected !== null}
+        title="Chi tiết chuyến"
+        description={selected ? tripIdentity(selected) : undefined}
+        onClose={() => setSelected(null)}
+      >
+        {selected && (
+          <TripDetail
+            trip={selected}
+            drivers={driversQuery.data ?? []}
+            vehicles={vehiclesQuery.data ?? []}
+            rostersAvailable={
+              driversQuery.isSuccess && vehiclesQuery.isSuccess
+            }
+            rostersLoading={
+              canReadRosters &&
+              (driversQuery.isPending || vehiclesQuery.isPending)
+            }
+            selfDriver={isDriver ? user : null}
+          />
+        )}
+      </SlideOver>
     </AppShell>
   );
 }

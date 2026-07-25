@@ -24,6 +24,7 @@ import { getErrorMessage } from "../lib/errors";
 import {
   DIRECTION,
   NEXT_TRIP_ACTION,
+  PAYMENT_STATUS,
   TRIP_STATUS,
   fmtDayLabel,
   fmtTime,
@@ -326,11 +327,13 @@ function BookingRow({
     (tripStatus === "in_progress" || tripStatus === "completed") &&
     b.payment?.status === "pending";
 
+  // Labels come from the shared PAYMENT_STATUS map so this and the
+  // history detail panel can't drift into calling the same state two
+  // different things. "pending" is excluded here because the "Thu tiền"
+  // button already communicates it.
   const paymentBadge =
     b.payment && b.payment.status !== "pending"
-      ? { collected: "Đã thu tiền", disputed: "Thiếu tiền", waived: "Đã miễn" }[
-          b.payment.status
-        ]
+      ? PAYMENT_STATUS[b.payment.status].label
       : null;
 
   return (
