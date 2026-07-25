@@ -39,6 +39,14 @@ class TripReportIssue(BaseModel):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class TripExtendWait(BaseModel):
+    """Dispatcher resolving an escalation by giving the pool more time.
+    Bounded so a stray value can't push a customer's departure hours
+    out — anything longer than this is really a rebooking, not a wait."""
+
+    extra_minutes: int = Field(default=20, ge=5, le=120)
+
+
 class AttentionItem(BaseModel):
     """
     A trip that needs a human decision right now — a forming pool that

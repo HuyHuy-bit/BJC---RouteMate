@@ -27,10 +27,12 @@ from app.core.dispatch_config import (
 from app.models.booking import Booking
 from app.models.corridor import Corridor
 from app.models.dispatch_event import DispatchEvent
+from app.core.pricing import price_for
 from app.models.enums import (
     BookingDirection,
     BookingStatus,
     DispatchEventType,
+    PaymentStatus,
     TripStatus,
     VehicleStatus,
 )
@@ -54,7 +56,11 @@ from app.services.pool_insertion import (
 )
 from app.services.reclustering import cluster_by_proximity, time_cluster
 from app.services.routing import routing_service
-from app.services.notification_service import notify_trip_disrupted, notify_trip_sealed
+from app.services.notification_service import (
+    notify_trip_disrupted,
+    notify_trip_sealed,
+    notify_wait_extended,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -824,6 +830,84 @@ def merge_trips(
         actor_user_id=actor_user_id,
         reason=reason,
         details={"absorbed_pool": str(source.id)},
+    )
+
+
+def extend_pool_wait(
+    db: Session,
+    trip: Trip,
+    extra_minutes: int,
+    actor_user_id: UUID | None = None,
+) -> Trip:
+    """
+    Escalation outcome: give an under-filled pool more time to fill
+    instead of leaving it stuck at its deadline.
+
+    Pushes the departure deadline out from NOW (not from the original
+    deadline, which is already in the past by the time a pool
+    escalates — extending from it could land the new deadline in the
+    past too and re-escalate on the very next tick).
+    """
+    trip.departure_deadline = datetime.now(timezone.utc) + timedelta(
+        minutes=extra_minutes
+    )
+    notify_wait_extended(db, trip, extra_minutes)
+    log_event(
+        db,
+        DispatchEventType.manual_override,
+        trip_id=trip.id,
+        actor_user_id=actor_user_id,
+        reason=f"dispatcher extended the wait by {extra_minutes} min",
+        details={"extra_minutes": extra_minutes},
+    )
+    return trip
+
+
+def upgrade_to_private(
+    db: Session,
+    trip: Trip,
+    actor_user_id: UUID | None = None,
+) -> Vehicle | None:
+    """
+    Escalation outcome: the lone passenger agreed (by phone — there is
+    no customer-facing channel, see notification_service) to take the
+    car as a private hire rather than keep waiting for companions who
+    aren't coming.
+
+    Re-prices the booking at the private rate and seals immediately: a
+    private hire is its own car by definition, so there is nothing left
+    to wait for. Returns the committed vehicle, or None if the fleet is
+    fully busy (the trip then stays forming and is retried like any
+    other under-vehicled pool).
+    """
+    active = active_bookings(trip)
+    if len(active) != 1:
+        raise ValueError(
+            "private upgrade only applies to a pool with exactly one booking"
+        )
+
+    booking = active[0]
+    corridor = db.get(Corridor, booking.corridor_id)
+    booking.is_private = True
+    booking.price_vnd = price_for(corridor, is_private=True, seats=booking.seats)
+    # The payment record was created at booking time against the shared
+    # fare; it has to follow the new price or the driver would collect
+    # the wrong amount at the end of the trip.
+    if booking.payment is not None and booking.payment.status == PaymentStatus.pending:
+        booking.payment.expected_amount_vnd = booking.price_vnd
+    db.flush()
+
+    log_event(
+        db,
+        DispatchEventType.manual_override,
+        trip_id=trip.id,
+        booking_id=booking.id,
+        actor_user_id=actor_user_id,
+        reason="customer accepted a private upgrade after the pool failed to fill",
+        details={"new_price_vnd": booking.price_vnd},
+    )
+    return seal_trip(
+        db, trip, datetime.now(timezone.utc), reason="upgraded to private hire"
     )
 
 

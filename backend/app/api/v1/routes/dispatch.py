@@ -24,6 +24,7 @@ from app.schemas.trip import (
     MatchingRunResult,
     MergeTripsResult,
     TripAssignDriver,
+    TripExtendWait,
     TripOut,
     TripReportIssue,
     TripStatusUpdate,
@@ -32,6 +33,7 @@ from app.services.audit import log_pii_access
 from app.services.booking_service import to_booking_out
 from app.services.dispatch_engine import SealDecision, evaluate_pool
 from app.services.dispatch_service import (
+    extend_pool_wait,
     merge_trips,
     report_trip_disrupted,
     seal_trip,
@@ -40,6 +42,7 @@ from app.services.dispatch_service import (
     release_vehicle_if_free,
     run_dispatch_cycle,
     trip_capacity,
+    upgrade_to_private,
 )
 from app.services.notification_service import notify_driver_assigned
 
@@ -330,6 +333,74 @@ def list_attention_items(
         )
 
     return items
+
+
+@router.post("/trips/{trip_id}/extend-wait", response_model=TripOut)
+def extend_wait(
+    trip_id: uuid.UUID,
+    payload: TripExtendWait,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
+):
+    """
+    Escalation outcome: the dispatcher phoned the waiting customer(s),
+    they're happy to wait a bit longer, so give the pool more time
+    rather than cancelling it.
+
+    There is no customer-facing channel in this system — offers like
+    this are made by phone (see notification_service's module docstring);
+    this endpoint records the outcome of that call.
+    """
+    trip = _load_trip(db, trip_id)
+    if trip.status != TripStatus.forming:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Trip is {trip.status.value}, not forming — nothing to extend",
+        )
+
+    extend_pool_wait(
+        db, trip, payload.extra_minutes, actor_user_id=current_user.id
+    )
+    db.commit()
+    db.refresh(trip)
+    return _to_trip_out(trip)
+
+
+@router.post("/trips/{trip_id}/upgrade-private", response_model=TripOut)
+def upgrade_private(
+    trip_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
+):
+    """
+    Escalation outcome: the lone passenger agreed on the phone to take
+    the car as a private hire instead of waiting for companions who
+    aren't coming. Re-prices at the private rate and departs.
+    """
+    trip = _load_trip(db, trip_id)
+    if trip.status != TripStatus.forming:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Trip is {trip.status.value}, not forming — cannot upgrade",
+        )
+
+    try:
+        vehicle = upgrade_to_private(db, trip, actor_user_id=current_user.id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        )
+
+    if vehicle is None:
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Khách đã đồng ý bao xe nhưng hiện không còn xe trống",
+        )
+
+    db.commit()
+    db.refresh(trip)
+    return _to_trip_out(trip)
 
 
 @router.post("/trips/{trip_id}/seal", response_model=TripOut)

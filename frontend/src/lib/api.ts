@@ -113,6 +113,16 @@ export const api = {
       apiClient
         .post<TripOut>(`/dispatch/trips/${tripId}/report-issue`, payload)
         .then((r) => r.data),
+    extendWait: (tripId: string, extraMinutes: number) =>
+      apiClient
+        .post<TripOut>(`/dispatch/trips/${tripId}/extend-wait`, {
+          extra_minutes: extraMinutes,
+        })
+        .then((r) => r.data),
+    upgradePrivate: (tripId: string) =>
+      apiClient
+        .post<TripOut>(`/dispatch/trips/${tripId}/upgrade-private`)
+        .then((r) => r.data),
   },
   notifications: {
     list: () =>

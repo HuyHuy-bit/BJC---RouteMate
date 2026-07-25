@@ -1,5 +1,6 @@
+import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Ban, Car, Users, Wrench } from "lucide-react";
+import { AlertTriangle, Ban, Car, Clock, Lock, Phone, Users, Wrench } from "lucide-react";
 import { api } from "../lib/api";
 import type { AttentionItem } from "../types";
 import { DIRECTION } from "../lib/format";
@@ -9,12 +10,19 @@ import Card from "./ui/Card";
 import { useToast } from "./ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 
+// How much longer "wait a bit more" actually means. Matches the
+// backend's TripExtendWait default.
+const EXTEND_MINUTES = 20;
+
 const OPTION_LABEL: Record<string, string> = {
   merge_with_nearby_pool: "Gộp với chuyến gần đó",
   offer_extended_wait: "Chờ thêm khách",
   offer_private_upgrade: "Đề nghị bao xe riêng",
   dispatch_at_loss: "Vẫn cho xe chạy dù chưa đủ khách",
-  refund_and_cancel: "Hoàn tiền và huỷ chuyến",
+  // Customers pay only after the trip, so a trip that never runs has
+  // nothing to refund — the old "Hoàn tiền và huỷ" label promised a
+  // step that doesn't exist in this business.
+  cancel: "Huỷ chuyến",
 };
 
 const KIND_BADGE: Record<AttentionItem["kind"], { icon: JSX.Element; label: string }> = {
@@ -29,6 +37,7 @@ const KIND_BADGE: Record<AttentionItem["kind"], { icon: JSX.Element; label: stri
 export default function AttentionPanel() {
   const toast = useToast();
   const queryClient = useQueryClient();
+  const [busy, setBusy] = useState<string | null>(null);
 
   const attentionQuery = useQuery({
     queryKey: ["attention"],
@@ -55,10 +64,36 @@ export default function AttentionPanel() {
   const handleCancelAll = async (item: AttentionItem) => {
     try {
       await Promise.all(item.bookings.map((b) => api.bookings.cancel(b.id)));
-      toast("Đã huỷ và hoàn tất xử lý.", "success");
+      toast("Đã huỷ chuyến.", "success");
       refresh();
     } catch {
       toast("Không huỷ được toàn bộ khách. Kiểm tra lại.", "error");
+    }
+  };
+
+  const handleExtendWait = async (item: AttentionItem) => {
+    setBusy(item.trip_id);
+    try {
+      await api.dispatch.extendWait(item.trip_id, EXTEND_MINUTES);
+      toast(`Đã gia hạn thêm ${EXTEND_MINUTES} phút.`, "success");
+      refresh();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không gia hạn được."), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleUpgradePrivate = async (item: AttentionItem) => {
+    setBusy(item.trip_id);
+    try {
+      await api.dispatch.upgradePrivate(item.trip_id);
+      toast("Đã chuyển thành bao xe riêng và cho xe chạy.", "success");
+      refresh();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không chuyển được sang bao xe."), "error");
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -94,10 +129,21 @@ export default function AttentionPanel() {
                   </span>
                 </div>
                 <p className="text-sm text-[var(--text)]">{item.reason}</p>
-                <ul className="text-xs text-[var(--text-tertiary)] mt-1">
+                {/* Tap-to-call: resolving one of these means phoning
+                    the customer — there's no customer-facing channel,
+                    so don't make staff copy a number by hand. */}
+                <ul className="text-xs text-[var(--text-tertiary)] mt-1 space-y-0.5">
                   {item.bookings.map((b) => (
-                    <li key={b.id}>
-                      {b.customer.full_name} — {b.customer.phone}
+                    <li key={b.id} className="flex items-center gap-1.5">
+                      <span>{b.customer.full_name}</span>
+                      <a
+                        href={`tel:${b.customer.phone}`}
+                        className="inline-flex items-center gap-1 text-[var(--brand-blue)] font-medium hover:underline"
+                        aria-label={`Gọi ${b.customer.full_name}`}
+                      >
+                        <Phone size={11} aria-hidden="true" />
+                        <span className="tnum">{b.customer.phone}</span>
+                      </a>
                     </li>
                   ))}
                 </ul>
@@ -116,19 +162,51 @@ export default function AttentionPanel() {
                 )}
               </div>
 
+              {/* Outcomes of the phone call the dispatcher just made.
+                  Order matches what's most likely to save the trip:
+                  wait a bit more, sell it as a private hire, send it
+                  anyway, or give up. */}
               <div className="flex flex-col gap-1.5 shrink-0">
                 {item.kind === "escalated" && (
-                  <Button variant="secondary" size="sm" onClick={() => handleForceSeal(item)}>
-                    Vẫn cho chạy
-                  </Button>
+                  <>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy === item.trip_id}
+                      iconLeft={<Clock size={12} aria-hidden="true" />}
+                      onClick={() => handleExtendWait(item)}
+                    >
+                      Chờ thêm {EXTEND_MINUTES} phút
+                    </Button>
+                    {item.passenger_count === 1 && (
+                      <Button
+                        variant="secondary"
+                        size="sm"
+                        disabled={busy === item.trip_id}
+                        iconLeft={<Lock size={12} aria-hidden="true" />}
+                        onClick={() => handleUpgradePrivate(item)}
+                      >
+                        Khách đồng ý bao xe
+                      </Button>
+                    )}
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      disabled={busy === item.trip_id}
+                      onClick={() => handleForceSeal(item)}
+                    >
+                      Vẫn cho chạy
+                    </Button>
+                  </>
                 )}
                 <Button
                   variant="danger-subtle"
                   size="sm"
+                  disabled={busy === item.trip_id}
                   iconLeft={<Ban size={12} aria-hidden="true" />}
                   onClick={() => handleCancelAll(item)}
                 >
-                  Huỷ & hoàn tiền
+                  Huỷ chuyến
                 </Button>
               </div>
             </div>

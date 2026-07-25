@@ -65,6 +65,14 @@ def _compose_disrupted_message(booking: Booking) -> str:
     )
 
 
+def _compose_wait_extended_message(booking: Booking, extra_minutes: int) -> str:
+    return (
+        f"Chào {booking.customer.full_name}, chuyến của bạn cần thêm khoảng "
+        f"{extra_minutes} phút để ghép đủ khách. Chúng tôi sẽ báo lại ngay khi "
+        f"xếp được xe. Cảm ơn bạn đã chờ."
+    )
+
+
 def notify_trip_sealed(db: Session, trip: Trip) -> list[Notification]:
     """Called once a pool is sealed — the customer's ride is now real."""
     created = []
@@ -125,6 +133,28 @@ def notify_trip_disrupted(db: Session, trip: Trip) -> list[Notification]:
             trip_id=trip.id,
             event="disrupted",
             message=_compose_disrupted_message(booking),
+        )
+        db.add(note)
+        created.append(note)
+    return created
+
+
+def notify_wait_extended(
+    db: Session, trip: Trip, extra_minutes: int
+) -> list[Notification]:
+    """Called when a dispatcher gives an under-filled pool more time —
+    see dispatch_service.py:extend_pool_wait. Someone who was promised a
+    departure and is now waiting longer deserves to be told, even if
+    (for now) a staff member has to relay it by hand."""
+    created = []
+    for booking in trip.bookings:
+        if booking.status.value in ("cancelled", "no_show"):
+            continue
+        note = Notification(
+            booking_id=booking.id,
+            trip_id=trip.id,
+            event="wait_extended",
+            message=_compose_wait_extended_message(booking, extra_minutes),
         )
         db.add(note)
         created.append(note)

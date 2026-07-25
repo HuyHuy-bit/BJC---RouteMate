@@ -143,12 +143,16 @@ def evaluate_pool(
         pool.pool_id,
         SealDecision.ESCALATE,
         f"outbound pool has {pool.passenger_count} of {needed} needed passengers",
+        # Note "cancel", not "refund_and_cancel": customers pay only
+        # after the trip is finished, so a booking that never runs has
+        # no money to give back. The old label implied a refund step
+        # that doesn't exist in this business.
         options=[
             "merge_with_nearby_pool",
             "offer_extended_wait",
             "offer_private_upgrade",
             "dispatch_at_loss",
-            "refund_and_cancel",
+            "cancel",
         ],
     )
 
