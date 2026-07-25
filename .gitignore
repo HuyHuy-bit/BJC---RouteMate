@@ -28,3 +28,6 @@ docker-compose.override.yml
 
 # os
 .DS_Store
+
+# typescript incremental build cache (generated)
+frontend/tsconfig.tsbuildinfo
