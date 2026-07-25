@@ -70,12 +70,25 @@ MAX_PASSENGER_DETOUR_MINUTES = 15
 MAX_POOL_DETOUR_MINUTES = 35
 
 # --- Scoring weights (must sum to 1.0) ---
-# Occupancy is weighted highest on purpose: filling one car before
-# opening a second is the primary business objective.
-WEIGHT_OCCUPANCY = 0.30
-WEIGHT_ADDED_DISTANCE = 0.25
-WEIGHT_WORST_DETOUR = 0.20
-WEIGHT_PICKUP_WAIT = 0.15
+# Occupancy used to be weighted highest (0.30) on the reasoning that
+# filling one car before opening a second is the primary business
+# objective — true, but that objective is already served STRUCTURALLY:
+# continuous matching always tries an existing pool before opening a new
+# one, and the seal logic refuses to leave a lone outbound passenger
+# dispatched without escalating first (see dispatch_engine.py). Weighting
+# it this heavily in the score on TOP of that double-counts it and
+# crowds out what the score is actually needed to distinguish between —
+# which of several already-feasible insertions is best for the people
+# actually in the car. Lowered to 0.18 and the freed weight moved to the
+# three passenger-experience terms (distance, detour, wait), which is
+# also why WEIGHT_PICKUP_WAIT is no longer the smallest: wait_term now
+# measures real marginal schedule disturbance to existing riders, not
+# just how far apart two requested times are, so it deserves to matter
+# more than it used to.
+WEIGHT_OCCUPANCY = 0.18
+WEIGHT_ADDED_DISTANCE = 0.28
+WEIGHT_WORST_DETOUR = 0.24
+WEIGHT_PICKUP_WAIT = 0.20
 WEIGHT_DEADLINE_PRESSURE = 0.10
 
 # An insertion scoring worse than this is rejected even if feasible —

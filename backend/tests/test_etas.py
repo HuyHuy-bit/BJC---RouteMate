@@ -16,7 +16,12 @@ from app.core.dispatch_config import (
     EARLY_PICKUP_TOLERANCE_MINUTES,
     LATE_PICKUP_TOLERANCE_MINUTES,
 )
-from app.services.pool_insertion import PoolMember, _as_utc, _best_ordering
+from app.services.pool_insertion import (
+    PoolMember,
+    _as_utc,
+    _best_ordering,
+    _marginal_disturbance_seconds,
+)
 
 BASE = datetime(2026, 7, 25, 8, 0, tzinfo=timezone.utc)
 
@@ -112,14 +117,17 @@ def test_ordering_scheduling_a_pickup_too_late_is_rejected():
 
 
 def test_early_arrival_forces_a_wait_that_delays_later_stops():
-    # A is picked up first, then the route would reach B's pickup WAY
+    # A is picked up first, then the route would reach B's pickup well
     # before B's requested time — this must become a forced wait, not a
     # free early pickup, and that wait must delay A's own dropoff (A is
-    # already in the car while the vehicle waits for B).
+    # already in the car while the vehicle waits for B). A's solo
+    # baseline is generous (20 min) so the wait doesn't ALSO trip the
+    # detour cap — this test is isolating wait-propagation specifically,
+    # not re-testing the detour rejection covered elsewhere.
     a, b = uuid4(), uuid4()
     members = [
-        _member(a, requested_offset_minutes=0),
-        _member(b, requested_offset_minutes=60),  # B wants pickup an hour later
+        _member(a, requested_offset_minutes=0, solo_seconds=1200),
+        _member(b, requested_offset_minutes=12),  # B wants pickup 12 min later
     ]
     index = _index_for(members)
     sequence = [(a, "pickup"), (b, "pickup"), (a, "dropoff"), (b, "dropoff")]
@@ -130,9 +138,9 @@ def test_early_arrival_forces_a_wait_that_delays_later_stops():
     total, order, offsets = _best_ordering(members, durations, index, trip_start)
 
     assert order != []
-    early_cutoff = 60 * 60 - EARLY_PICKUP_TOLERANCE_MINUTES * 60
+    early_cutoff = 12 * 60 - EARLY_PICKUP_TOLERANCE_MINUTES * 60
     # B's pickup offset must be pushed out to (at least) the early
-    # tolerance boundary, not the raw 60+... arrival time.
+    # tolerance boundary, not the raw 60s arrival time.
     assert offsets[b]["pickup"] >= early_cutoff
     # The forced wait before B's pickup happened while A was already
     # aboard, so A's dropoff (which comes after B's pickup in this
@@ -169,6 +177,62 @@ def test_write_etas_anchors_to_earliest_requested_pickup():
     assert ba.estimated_dropoff_at == base + timedelta(seconds=1800)
     assert bb.estimated_pickup_at == base + timedelta(seconds=300)
     assert bb.estimated_dropoff_at == base + timedelta(seconds=2400)
+
+
+# -- Phase 5: marginal wait disturbance vs. the old raw-gap measure ---
+
+
+def test_marginal_disturbance_is_zero_when_no_existing_member_is_delayed():
+    # Old wait_term measured |candidate.requested - earliest member's
+    # requested| — for a candidate requesting 40 minutes after the
+    # pool's earliest member, that's a big number (40 min), regardless
+    # of whether the insertion actually delayed anyone. Here, neither
+    # existing member's own pickup moves at all between the baseline
+    # and post-insertion schedule — the true disturbance is zero, which
+    # the old formula could never express.
+    a, b = uuid4(), uuid4()
+    members = [_member(a), _member(b)]
+    baseline_offsets = {
+        a: {"pickup": 0.0, "dropoff": 600.0},
+        b: {"pickup": 120.0, "dropoff": 700.0},
+    }
+    # Post-insertion: A and B's pickups are UNCHANGED (candidate slotted
+    # in after both, e.g. picked up last).
+    offsets = {
+        a: {"pickup": 0.0, "dropoff": 600.0},
+        b: {"pickup": 120.0, "dropoff": 700.0},
+        uuid4(): {"pickup": 300.0, "dropoff": 900.0},  # the candidate
+    }
+
+    disturbance = _marginal_disturbance_seconds(members, baseline_offsets, offsets)
+    assert disturbance == 0.0
+
+    # What the OLD formula would have reported for a candidate requested
+    # 40 minutes after the pool's earliest member — large, and wrong
+    # here, since it's entirely disconnected from what actually happened
+    # to A and B's schedules.
+    old_raw_gap_seconds = 40 * 60
+    assert disturbance < old_raw_gap_seconds
+
+
+def test_marginal_disturbance_reflects_real_delay_to_an_existing_member():
+    # Same shape, but this time the insertion genuinely pushes B's
+    # pickup 20 minutes later (e.g. a detour to reach the candidate
+    # first). The new measure must reflect that real delay.
+    a, b = uuid4(), uuid4()
+    members = [_member(a), _member(b)]
+    baseline_offsets = {
+        a: {"pickup": 0.0, "dropoff": 600.0},
+        b: {"pickup": 120.0, "dropoff": 700.0},
+    }
+    offsets = {
+        a: {"pickup": 0.0, "dropoff": 600.0},
+        b: {"pickup": 120.0 + 20 * 60, "dropoff": 700.0 + 20 * 60},
+        uuid4(): {"pickup": 60.0, "dropoff": 900.0},
+    }
+
+    disturbance = _marginal_disturbance_seconds(members, baseline_offsets, offsets)
+    assert disturbance == 20 * 60
 
 
 # -- tz regression ----------------------------------------------------

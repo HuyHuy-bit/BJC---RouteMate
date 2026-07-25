@@ -48,6 +48,7 @@ from app.services.pool_insertion import (
     best_ordering_from_position,
     compute_solo_baseline,
     evaluate_insertion,
+    solve_group_ordering,
 )
 from app.services.reclustering import cluster_by_proximity, time_cluster
 from app.services.routing import routing_service
@@ -126,6 +127,18 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
     if not active:
         return
 
+    # Nothing to do if neither WHO is in this pool nor WHICH vehicle it's
+    # anchored to has changed since the last solve — centroid, deadline,
+    # route, and every booking's stop_order/ETA are all still correct.
+    # Skips the routing-service call(s) and the solver entirely, not just
+    # a cheap early return; see Trip.solved_booking_ids docstring.
+    active_ids = sorted(str(b.id) for b in active)
+    if (
+        trip.solved_booking_ids == active_ids
+        and trip.solved_vehicle_id == trip.vehicle_id
+    ):
+        return
+
     pickups = [_coords(b)[0] for b in active]
     lat = sum(p[0] for p in pickups) / len(pickups)
     lng = sum(p[1] for p in pickups) / len(pickups)
@@ -186,13 +199,15 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
                 [c for m in members for c in (m.pickup, m.dropoff)]
             )
     else:
-        # Reuse the insertion evaluator's ordering for a consistent route.
-        result = evaluate_insertion(members[:-1], members[-1])
-        if result.feasible and result.ordered_stops:
-            route = routing_service.route([s.coord for s in result.ordered_stops])
-            offsets = result.stop_offsets_seconds
+        # Solve for the actual whole group — not the old
+        # members[:-1]/[-1] split, which had no principled meaning (see
+        # solve_group_ordering's docstring).
+        _total, ordered_stops, group_offsets = solve_group_ordering(members)
+        if ordered_stops:
+            route = routing_service.route([s.coord for s in ordered_stops])
+            offsets = group_offsets
             for rank, stop in enumerate(
-                [s for s in result.ordered_stops if s.kind == "pickup"], start=1
+                [s for s in ordered_stops if s.kind == "pickup"], start=1
             ):
                 for b in active:
                     if b.id == stop.booking_id:
@@ -208,6 +223,9 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
     trip.route_is_estimate = route.is_estimate
 
     _write_etas(active, offsets, route.total_duration_seconds)
+
+    trip.solved_booking_ids = active_ids
+    trip.solved_vehicle_id = trip.vehicle_id
 
 
 def find_pool_for_booking(db: Session, booking: Booking) -> Trip | None:
@@ -294,11 +312,11 @@ def find_returning_vehicle(db: Session, booking: Booking) -> Vehicle | None:
     meant it could open a second car (or leave the booking waiting) while
     a perfectly good one was minutes away.
 
-    "Vehicle position" here is inferred, not GPS-tracked: it's the
-    estimated dropoff time already computed for the outbound trip's last
-    stop (see _apply_etas), which is the same estimate the customer was
-    shown. There's no live telemetry in this system, so this is a
-    forecast, not a fact — a badly delayed outbound run could make the
+    "Vehicle position" here is inferred from timing, not the vehicle's
+    actual GPS location: it's the estimated dropoff time already
+    computed for the outbound trip's last stop (see _write_etas), which
+    is the same estimate the customer was shown. This is a forecast, not
+    a fact — a badly delayed outbound run could make the
     van later than predicted. Good enough to prefer a real candidate over
     guessing blind, not a substitute for actual vehicle tracking.
 
@@ -435,7 +453,15 @@ def assign_booking(db: Session, booking: Booking) -> Trip:
                 reason="no existing pool was a viable fit",
             )
 
-    booking.trip_id = trip.id
+    # Through the relationship, not the raw trip_id column — required,
+    # not stylistic. `trip` may already be loaded in this session's
+    # identity map (e.g. find_pool_for_booking just iterated it while
+    # evaluating candidates); a raw trip_id write doesn't retroactively
+    # add this booking to that already-cached trip.bookings collection,
+    # so _refresh_pool_geometry below would compute geometry as if this
+    # booking didn't exist yet. Same class of bug fixed in
+    # recluster_forming_pools's reconciliation loop.
+    booking.trip = trip
     booking.status = BookingStatus.matched
     db.flush()
 
@@ -724,7 +750,12 @@ def merge_trips(
     dispatcher override."""
     for b in list(source.bookings):
         if b.status not in (BookingStatus.cancelled, BookingStatus.no_show):
-            b.trip_id = target.id
+            # Through the relationship, not the raw column — `target` is
+            # passed in already loaded, so a raw trip_id write wouldn't
+            # be reflected in target.bookings when _refresh_pool_geometry
+            # reads it two lines down. See assign_booking for the same
+            # bug in its original form.
+            b.trip = target
     source.status = TripStatus.cancelled
     db.flush()
     _refresh_pool_geometry(db, target)

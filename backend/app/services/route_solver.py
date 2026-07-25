@@ -42,7 +42,7 @@ def solve_pdp(
     kinds: list[str],
     owners: list,
     cost: Callable[[int, int], float],
-    feasible: Callable[[int, float], tuple[bool, float]] | None = None,
+    feasible: Callable[[int, float, dict], tuple[bool, float]] | None = None,
     start_cost: Callable[[int], float] | None = None,
 ) -> tuple[float, list[int], list[float]]:
     """
@@ -54,9 +54,15 @@ def solve_pdp(
     precedes their own dropoff. `cost(i, j)` is the leg cost from stop i
     to stop j — any non-negative metric (distance or duration).
 
-    `feasible(stop_index, arrival)`, if given, is called before a stop is
-    tentatively visited, with `arrival` = cumulative cost to reach it
-    (before any wait). It returns `(ok, wait)`: `ok=False` prunes that
+    `feasible(stop_index, arrival, boarded_at)`, if given, is called
+    before a stop is tentatively visited, with `arrival` = cumulative
+    cost to reach it (before any wait) and `boarded_at` = a dict of
+    owner -> arrival time at THEIR OWN pickup, for every owner currently
+    "in the car" at this point in the partial route being built (kept in
+    lockstep with the search's own pickup/backtrack bookkeeping, so it's
+    always correct for whichever branch is being explored — a per-rider
+    detour check at a dropoff stop just reads `boarded_at[owner]`
+    straight out of it). Returns `(ok, wait)`: `ok=False` prunes that
     branch entirely (this stop can never be visited at this point in any
     route built from here); `wait` is additional time forced onto the
     schedule at that stop (e.g. the vehicle arrived early and must wait)
@@ -87,6 +93,7 @@ def solve_pdp(
 
     used = [False] * n
     picked: set = set()
+    boarded_at: dict = {}
     seq: list[int] = []
     arrivals: list[float] = []
     best_cost = float("inf")
@@ -117,13 +124,14 @@ def solve_pdp(
             arrival = running + step
             wait = 0.0
             if feasible is not None:
-                ok, wait = feasible(i, arrival)
+                ok, wait = feasible(i, arrival, boarded_at)
                 if not ok:
                     continue  # this stop can't be scheduled here — prune
             used[i] = True
             is_pickup = kinds[i] == "pickup"
             if is_pickup:
                 picked.add(owners[i])
+                boarded_at[owners[i]] = arrival + wait
             seq.append(i)
             arrivals.append(arrival + wait)
             backtrack(arrival + wait)
@@ -131,6 +139,7 @@ def solve_pdp(
             seq.pop()
             if is_pickup:
                 picked.discard(owners[i])
+                del boarded_at[owners[i]]
             used[i] = False
 
     backtrack(0.0)

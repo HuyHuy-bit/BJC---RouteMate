@@ -249,7 +249,10 @@ def unassign_booking(
         reason="manually unassigned by dispatcher",
         actor_user_id=current_user.id,
     )
-    booking.trip_id = None
+    # Through the relationship, not the raw column — see
+    # dispatch_service.py:assign_booking for why a raw trip_id write can
+    # leave a still-loaded trip's .bookings collection stale.
+    booking.trip = None
     db.commit()
     db.refresh(booking)
     return to_booking_out(booking)

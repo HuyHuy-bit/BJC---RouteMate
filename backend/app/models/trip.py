@@ -3,7 +3,7 @@ from datetime import datetime
 
 from geoalchemy2 import Geography
 from sqlalchemy import DateTime, Enum, Float, ForeignKey, String, Text
-from sqlalchemy.dialects.postgresql import UUID
+from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from app.db.base import Base, TimestampMixin
@@ -77,6 +77,17 @@ class Trip(Base, TimestampMixin):
     # routing API was unavailable — surfaced so dispatchers know the ETAs
     # are softer than usual.
     route_is_estimate: Mapped[bool | None] = mapped_column(nullable=True)
+
+    # Snapshot of what the ABOVE route/geometry was actually solved for —
+    # which booking IDs, and which vehicle (if any) it was anchored to.
+    # _refresh_pool_geometry compares current state against this and
+    # skips re-solving (no routing calls, no re-derivation) when nothing
+    # has actually changed, rather than recomputing on every call
+    # regardless. Plain UUID, not a live FK relationship — this is a
+    # comparison snapshot, not a reference that needs to stay valid if
+    # the vehicle is later deleted.
+    solved_booking_ids: Mapped[list[str] | None] = mapped_column(JSONB, nullable=True)
+    solved_vehicle_id: Mapped[uuid.UUID | None] = mapped_column(nullable=True)
 
     # When this trip actually finished (or was cancelled) — not inferred
     # from updated_at, which drifts if anything else touches the row
