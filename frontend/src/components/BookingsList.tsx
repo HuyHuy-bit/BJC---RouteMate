@@ -64,7 +64,8 @@ export default function BookingsList({
     // non-sequitur — the customers may well already be there.
     return filtered ? (
       <EmptyState
-        icon={<Filter size={18} aria-hidden="true" />}
+        compact
+        icon={<Filter size={16} aria-hidden="true" />}
         title="Không có khách nào ở trạng thái này"
         description="Bộ lọc đang thu hẹp danh sách. Bỏ lọc để xem toàn bộ hàng chờ."
         action={

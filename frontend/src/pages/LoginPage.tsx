@@ -42,7 +42,9 @@ export default function LoginPage() {
           className="absolute inset-0"
           style={{
             background:
-              "linear-gradient(135deg, rgba(16,23,40,0.92) 0%, rgba(27,95,168,0.72) 55%, rgba(214,51,31,0.55) 100%)",
+              // Navy into brand orange, matching the mark. Was three
+              // brand colours stacked at once, which read as muddy.
+              "linear-gradient(135deg, rgba(11,18,38,0.94) 0%, rgba(22,36,74,0.86) 45%, rgba(199,64,10,0.62) 100%)",
           }}
         />
         <div className="relative h-full flex flex-col justify-between p-10 xl:p-14 text-white">

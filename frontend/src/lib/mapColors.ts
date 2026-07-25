@@ -13,6 +13,6 @@
  * import in BookingForm.
  */
 export const MAP_COLORS = {
-  pickup: "#1b5fa8",
-  dropoff: "#d6331f",
+  pickup: "#1f4380",
+  dropoff: "#c7400a",
 } as const;

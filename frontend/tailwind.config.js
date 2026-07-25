@@ -27,18 +27,22 @@ export default {
         "on-inverse": "var(--text-on-inverse)",
         "on-danger": "var(--on-danger)",
 
-        /* Brand. `brand` is the fill (identical in both themes so
-           the red reads the same); `brand-text` is the lifted
-           variant for red used as text or an icon. */
+        /* Brand orange, split by contrast duty — see index.css.
+           `brand` is the deep fill that carries white text and is
+           identical in both themes. `accent` is the bright logo
+           orange for marks and indicators only. `accent-text` is the
+           readable-at-body-size variant. */
         brand: {
-          DEFAULT: "var(--brand-red)",
-          hover: "var(--brand-red-hover)",
-          subtle: "var(--brand-red-subtle)",
-          text: "var(--brand-red-text)",
+          DEFAULT: "var(--brand)",
+          hover: "var(--brand-hover)",
+          subtle: "var(--brand-subtle)",
+          text: "var(--accent-text)",
         },
+        accent: "var(--accent)",
+        navy: "var(--navy)",
         cobalt: {
-          DEFAULT: "var(--brand-blue)",
-          subtle: "var(--brand-blue-subtle)",
+          DEFAULT: "var(--cobalt)",
+          subtle: "var(--cobalt-subtle)",
         },
 
         /* Semantic */

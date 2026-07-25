@@ -149,23 +149,29 @@ export default function DispatchBoard() {
           When a query has failed these show "—" rather than 0. A
           confident zero is a lie about the state of the business, and
           it is exactly the kind of lie a dispatcher would act on. */}
-      <div className="grid grid-cols-2 lg:grid-cols-4 gap-3 mb-6">
+      {/* One hairline-divided strip rather than four cards. The cards
+          spent ~140px of vertical space to show four integers, with the
+          label and the value at nearly the same visual weight — so the
+          numbers didn't read as the headline and the queue below got
+          pushed off the fold. Card chrome now means "an object you can
+          act on"; a number is just a number. */}
+      <Card className="mb-5 grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-line">
         <Stat
           label="Khách chờ ghép"
           value={statsReady ? stats.waiting : "—"}
-          tone="warning"
+          tone={statsReady && stats.waiting > 0 ? "warning" : undefined}
         />
         <Stat
           label="Khách đã ghép"
           value={statsReady ? stats.matched : "—"}
-          tone="success"
+          tone={statsReady && stats.matched > 0 ? "success" : undefined}
         />
         <Stat label="Xe đang chạy" value={statsReady ? stats.running : "—"} />
         <Stat
           label="Doanh thu dự kiến"
           value={statsReady ? fmtVnd(stats.revenue) : "—"}
         />
-      </div>
+      </Card>
 
       <AttentionPanel />
 
@@ -295,6 +301,8 @@ function Stat({
 }: {
   label: string;
   value: string | number;
+  /** Only applied when the number is non-zero — a `0` rendered in
+   *  warning amber looks like a fault rather than a quiet queue. */
   tone?: "warning" | "success";
 }) {
   const color =
@@ -304,9 +312,11 @@ function Stat({
         ? "text-success"
         : "text-ink";
   return (
-    <Card className="px-4 py-3">
-      <p className="text-2xs text-faint mb-1">{label}</p>
-      <p className={`text-xl font-semibold tnum ${color}`}>{value}</p>
-    </Card>
+    <div className="px-4 py-3">
+      <p className="text-2xs text-faint mb-1 uppercase tracking-wide">{label}</p>
+      <p className={`text-2xl font-semibold tnum leading-none ${color}`}>
+        {value}
+      </p>
+    </div>
   );
 }

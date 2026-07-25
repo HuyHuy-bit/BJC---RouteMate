@@ -113,7 +113,8 @@ export default function FleetStatusTable({ trips }: { trips: TripOut[] }) {
 
       {rows.length === 0 ? (
         <EmptyState
-          icon={<Car size={18} aria-hidden="true" />}
+          compact
+          icon={<Car size={16} aria-hidden="true" />}
           title="Chưa có chuyến nào đang hoạt động"
           description="Khi có chuyến được ghép, tình trạng từng xe sẽ hiện ở đây."
         />

@@ -21,44 +21,69 @@
 :root[data-theme="light"] {
   color-scheme: light;
 
-  /* --- Brand (from BJC logo + Thành Công fleet livery) --- */
-  --brand-red: #d6331f;
-  --brand-red-hover: #b82a19;
-  --brand-red-subtle: #fef2f0;
-  --brand-blue: #1b5fa8;
-  --brand-blue-subtle: #eef4fb;
+  /* --- Brand (from the Thành Công Xe Ghép mark: orange + navy) ---
+     The logo's bright orange cannot carry white text — white on
+     #FF5A1F is 3.12:1, well under AA — and darkening it far enough
+     for white text stops it being the logo colour. So the palette
+     splits the orange in two, exactly as the mark itself does:
+     bright orange for large display and non-text marks, a deeper
+     orange for anything that must sit under white text.
 
-  /* --- Surfaces --- */
-  --bg: #f7f8fa;
+     --brand      solid fills that carry white text (5.04:1)
+     --accent     brand marks, indicators, focus (non-text, 3:1)
+     --accent-text  orange readable as small text
+     --navy       structural colour; also the inverse fill */
+  --brand: #c7400a;
+  --brand-hover: #a83508;
+  --brand-subtle: #fff2ec;
+  --accent: #f2541b;       /* 3.47 on surface, 3.07 on sunken */
+  --navy: #16244a;
+
+  /* Links, info, and the pickup half of the pickup/dropoff pair —
+     the logo navy lightened enough to read as interactive rather
+     than as body text. */
+  --cobalt: #1f4380;       /* 9.66:1 */
+  --cobalt-subtle: #ecf1fa;
+
+  /* --- Surfaces. Neutrals carry a slight navy bias so they sit
+         under the brand rather than beside it. --- */
+  --bg: #f6f7fa;
   --surface: #ffffff;
-  --surface-sunken: #f1f3f6;
-  --surface-inverse: #101728;
+  --surface-sunken: #eff1f6;
+  --surface-inverse: var(--navy);
   --text-on-inverse: #ffffff;
 
   /* --- Text. Ratios below are the WORST case across all three
          surfaces (sunken is darkest), not just against white. --- */
-  --text: #101728;           /* 16.07:1 */
-  --text-secondary: #4a5568; /*  6.77:1 */
-  --text-tertiary: #5b667a;  /*  5.21:1 — was #64748b at 4.28, under AA */
+  --text: #14203c;           /* 14.28:1 */
+  --text-secondary: #47536b; /*  6.84:1 */
+  --text-tertiary: #5a6478;  /*  5.27:1 */
   --text-inverse: #ffffff;
 
   /* --- Borders ---
      --border is decorative separation (exempt from 1.4.11).
      --border-strong is the visible edge of a real control, so it
-     must clear 3:1 — it measures 3.28:1 on --surface. */
-  --border: #e3e7ed;
-  --border-strong: #858f9c;
-  --border-focus: var(--brand-blue);
+     must clear 3:1 — it measures 3.26:1 on --surface. */
+  --border: #dde2ea;
+  --border-strong: #868fa0;
+  /* Orange focus ring: unmistakably ours, and it can never be
+     confused with the blue of a link or the red of a destructive
+     control. 3.47:1 against the surface it sits on. */
+  --border-focus: var(--accent);
 
-  /* --- Semantic --- */
+  /* --- Semantic ---
+     Danger stays a true red. Previously the primary action was
+     #d6331f and danger was #b3261e — two reds close enough that
+     "Ghép chuyến" and a delete button read as the same colour. With
+     the primary now orange, red means destructive and nothing else. */
   --success: #14714a;
   --success-subtle: #eaf6f0;
   --warning: #9a5b00;
   --warning-subtle: #fdf5e7;
   --danger: #b3261e;
   --danger-subtle: #fdf0ef;
-  --info: var(--brand-blue);
-  --info-subtle: var(--brand-blue-subtle);
+  --info: var(--cobalt);
+  --info-subtle: var(--cobalt-subtle);
 
   /* --- Skeleton shimmer highlight --- */
   --shimmer: #e8ebf0;
@@ -84,35 +109,45 @@
 :root[data-theme="dark"] {
   color-scheme: dark;
 
-  --brand-red: #d6331f;
-  --brand-red-hover: #e8442d;
-  --brand-red-subtle: #2a1512;
-  --brand-blue: #7fb3ea;
-  --brand-blue-subtle: #111e2c;
+  /* The fill keeps its exact light-mode value: white on #c7400a is
+     5.04:1 either way, so the primary button is literally the same
+     orange in both themes and the brand doesn't shift. Only the
+     non-text accent lifts, because a deep orange disappears against
+     a dark ground. */
+  --brand: #c7400a;
+  --brand-hover: #d9490d;
+  --brand-subtle: #2a1409;
+  --accent: #ff6b33;         /* 5.99 on surface */
+  --navy: #16244a;
 
-  --bg: #0f1216;
-  --surface: #161b21;
-  --surface-sunken: #1e242b;
-  --surface-inverse: #e9ecf0;
-  --text-on-inverse: #101728;
+  --cobalt: #8fb4e8;         /* 7.98 on surface */
+  --cobalt-subtle: #132038;
 
-  --text: #e9ecf0;           /* 13.20:1 */
-  --text-secondary: #aab4c0; /*  7.45:1 */
-  --text-tertiary: #8b95a3;  /*  5.16:1 */
-  --text-inverse: #101728;
+  /* Ground is navy-black rather than neutral black — the same hue
+     family as the mark, so dark mode still reads as this brand. */
+  --bg: #0c1322;
+  --surface: #131c30;
+  --surface-sunken: #1b2440;
+  --surface-inverse: #e9ecf2;
+  --text-on-inverse: #14203c;
 
-  --border: #272e36;
-  --border-strong: #5f6979;  /* 3.12:1 on --surface */
-  --border-focus: var(--brand-blue);
+  --text: #e8ecf3;           /* 12.91:1 */
+  --text-secondary: #a8b2c4; /*  7.16:1 */
+  --text-tertiary: #8a94a8;  /*  5.01:1 */
+  --text-inverse: #14203c;
+
+  --border: #232d45;
+  --border-strong: #657189;  /* 3.46:1 on --surface */
+  --border-focus: var(--accent);
 
   --success: #5fbf92;
   --success-subtle: #12241c;
   --warning: #e0a94a;
   --warning-subtle: #241c0e;
   --danger: #ff8b78;
-  --danger-subtle: #2a1512;
-  --info: var(--brand-blue);
-  --info-subtle: var(--brand-blue-subtle);
+  --danger-subtle: #2f1613;
+  --info: var(--cobalt);
+  --info-subtle: var(--cobalt-subtle);
 
   --shimmer: #252c35;
 
@@ -126,17 +161,18 @@
   --scrim: rgba(0, 0, 0, 0.6);
 }
 
-/* Red as text/icon. Light mode can use the brand value directly;
-   dark mode needs it lifted to stay legible. */
+/* Orange readable as small text — the dropoff marker, an inline
+   emphasis. The bright accent is a mark colour only; at body size it
+   would fail AA on both grounds. */
 :root,
-:root[data-theme="light"] { --brand-red-text: #d6331f; }
-:root[data-theme="dark"]  { --brand-red-text: #ff7a63; }
+:root[data-theme="light"] { --accent-text: #c7400a; }  /* 5.04:1 */
+:root[data-theme="dark"]  { --accent-text: #ff9166; }  /* 7.68:1 */
 
 /* Deliberately theme-invariant: the ground behind the login fleet
    photo. --surface-inverse flips light in dark mode, which is
    correct for a filter chip but would turn this panel's white
    text invisible. */
-:root { --photo-ground: #101728; }
+:root { --photo-ground: #0b1226; }
 
 /* Text sitting ON a solid semantic fill. --danger inverts between
    themes (#b3261e light, #ff8b78 dark), so hardcoded white on it

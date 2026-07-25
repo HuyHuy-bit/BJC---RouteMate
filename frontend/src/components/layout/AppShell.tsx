@@ -35,18 +35,33 @@ export default function AppShell({
           }`}
         >
           <div className="flex items-center justify-between h-14 gap-4">
-            <Link to="/" className="flex items-center gap-2.5 min-w-0 shrink-0">
-              <img
-                src="/bjc-logo.jpg"
-                alt=""
-                className="w-8 h-8 rounded object-cover shrink-0"
-              />
-              <div className="min-w-0 hidden sm:block">
+            <Link
+              to="/"
+              className="flex items-center gap-2.5 min-w-0 shrink-0 rounded"
+            >
+              {/* The logo file is an opaque JPEG, so in dark mode it
+                  arrives as a bright white square. Seating it on a
+                  deliberate white chip with a hairline turns that from
+                  a glare into an intentional plate — and gives the
+                  artwork its own edge instead of clipping the oval. */}
+              <span className="w-8 h-8 rounded bg-white border border-line flex items-center justify-center shrink-0 overflow-hidden">
+                <img
+                  src="/bjc-logo.jpg"
+                  alt=""
+                  className="w-full h-full object-contain"
+                />
+              </span>
+              {/* The wordmark carries the brand at small sizes, since a
+                  fine oval mark is unreadable at 32px. Kept visible on
+                  phones too — a driver's only brand cue was otherwise
+                  an illegible smudge. */}
+              <div className="min-w-0">
                 <div className="text-sm font-semibold leading-tight truncate font-display">
-                  Thành Công Limousine
+                  Thành Công
+                  <span className="hidden sm:inline"> Limousine</span>
                 </div>
                 <div className="text-2xs text-faint leading-tight tracking-wide">
-                  BJC GROUP
+                  XE GHÉP · BJC GROUP
                 </div>
               </div>
             </Link>
