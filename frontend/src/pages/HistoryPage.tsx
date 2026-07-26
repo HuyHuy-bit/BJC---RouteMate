@@ -215,7 +215,7 @@ export default function HistoryPage() {
       <QueryState
         query={historyQuery}
         errorTitle="Không tải được lịch sử chuyến"
-        skeleton={<Skeleton className="h-96 w-full rounded-lg" />}
+        skeleton={<Skeleton className="h-96 w-full rounded-md" />}
         empty={
           <Card>
             <EmptyState

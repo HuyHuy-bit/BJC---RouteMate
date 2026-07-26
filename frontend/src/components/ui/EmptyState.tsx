@@ -32,7 +32,7 @@ export default function EmptyState({
     >
       {icon && (
         <div
-          className={`rounded-lg bg-sunken flex items-center justify-center text-faint ${
+          className={`rounded-md bg-sunken flex items-center justify-center text-faint ${
             compact ? "w-8 h-8 mb-2" : "w-10 h-10 mb-3"
           }`}
           aria-hidden="true"

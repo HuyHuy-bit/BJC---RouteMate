@@ -57,7 +57,7 @@ export default function NotificationsPage() {
         errorTitle="Không tải được thông báo"
         skeleton={
           <div className="space-y-3">
-            <Skeleton className="h-24 w-full rounded-lg" count={4} />
+            <Skeleton className="h-24 w-full rounded-md" count={4} />
           </div>
         }
         empty={

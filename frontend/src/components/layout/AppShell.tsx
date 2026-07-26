@@ -29,6 +29,18 @@ export default function AppShell({
   return (
     <div className="min-h-screen bg-canvas">
       <header className="sticky top-0 z-header bg-surface/85 backdrop-blur-md border-b border-line">
+        {/* Brand seam — a callback to the diagonal orange stripe on the
+            physical fleet, so the app reads as this company's rather
+            than a generic admin template. Three flat tokens, no new
+            hex: the same brand/accent/navy the rest of the UI uses. */}
+        <div
+          aria-hidden="true"
+          className="h-[3px] w-full"
+          style={{
+            background:
+              "linear-gradient(90deg, var(--brand) 0%, var(--accent) 55%, var(--navy) 100%)",
+          }}
+        />
         <div
           className={`mx-auto px-4 sm:px-6 ${
             width === "wide" ? "max-w-[1400px]" : "max-w-3xl"
@@ -163,7 +175,7 @@ function NavLink({
         "h-touch px-2 sm:px-3 inline-flex items-center gap-2 rounded",
         "text-base font-medium transition-colors",
         active
-          ? "text-ink bg-sunken"
+          ? "text-brand-text bg-brand-subtle"
           : "text-muted hover:text-ink hover:bg-sunken",
       ].join(" ")}
     >

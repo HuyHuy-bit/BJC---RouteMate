@@ -95,10 +95,10 @@ export function ErrorState({
   return (
     <div
       role="alert"
-      className="flex flex-col items-center justify-center text-center py-10 px-6 border border-danger/40 bg-danger-subtle rounded-lg"
+      className="flex flex-col items-center justify-center text-center py-10 px-6 border border-danger/40 bg-danger-subtle rounded-md"
     >
       <div
-        className="w-10 h-10 rounded-lg bg-surface flex items-center justify-center mb-3 text-danger"
+        className="w-10 h-10 rounded-md bg-surface flex items-center justify-center mb-3 text-danger"
         aria-hidden="true"
       >
         <WifiOff size={18} />

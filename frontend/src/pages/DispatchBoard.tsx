@@ -1,7 +1,16 @@
-import { useMemo, useState } from "react";
+import { useMemo, useState, type ReactNode } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Link } from "react-router-dom";
-import { Bell, Plus, Shuffle } from "lucide-react";
+import {
+  Bell,
+  Car,
+  Clock,
+  ClipboardCheck,
+  Plus,
+  Shuffle,
+  UserCheck,
+  Users,
+} from "lucide-react";
 import { api } from "../lib/api";
 import type { BookingStatus } from "../types";
 import AppShell from "../components/layout/AppShell";
@@ -158,17 +167,24 @@ export default function DispatchBoard() {
           act on"; a number is just a number. */}
       <Card className="mb-5 grid grid-cols-2 lg:grid-cols-4 divide-y lg:divide-y-0 lg:divide-x divide-line">
         <Stat
+          icon={<Users size={15} aria-hidden="true" />}
           label="Khách chờ ghép"
           value={statsReady ? stats.waiting : "—"}
           tone={statsReady && stats.waiting > 0 ? "warning" : undefined}
         />
         <Stat
+          icon={<UserCheck size={15} aria-hidden="true" />}
           label="Khách đã ghép"
           value={statsReady ? stats.matched : "—"}
           tone={statsReady && stats.matched > 0 ? "success" : undefined}
         />
-        <Stat label="Xe đang chạy" value={statsReady ? stats.running : "—"} />
         <Stat
+          icon={<Car size={15} aria-hidden="true" />}
+          label="Xe đang chạy"
+          value={statsReady ? stats.running : "—"}
+        />
+        <Stat
+          icon={<ClipboardCheck size={15} aria-hidden="true" />}
           label="Chờ duyệt hoàn thành"
           value={statsReady ? stats.awaitingReview : "—"}
           tone={statsReady && stats.awaitingReview > 0 ? "warning" : undefined}
@@ -186,7 +202,7 @@ export default function DispatchBoard() {
         <QueryState
           query={tripsQuery}
           errorTitle="Không tải được tình trạng đội xe"
-          skeleton={<Skeleton className="h-56 w-full rounded-lg" />}
+          skeleton={<Skeleton className="h-56 w-full rounded-md" />}
         >
           {(tripList) => <FleetStatusTable trips={tripList} />}
         </QueryState>
@@ -200,9 +216,10 @@ export default function DispatchBoard() {
         {/* Queue */}
         <Card className="overflow-hidden">
           <div className="px-4 py-3 border-b border-line flex items-center justify-between gap-2">
-            <h2 className="text-base font-semibold">
+            <h2 className="text-base font-semibold flex items-center gap-1.5">
+              <Clock size={14} className="text-faint" aria-hidden="true" />
               Hàng chờ
-              <span className="text-faint font-normal ml-1.5 tnum">
+              <span className="text-faint font-normal tnum">
                 {visibleBookings.length}
               </span>
             </h2>
@@ -260,9 +277,10 @@ export default function DispatchBoard() {
         {/* Cars */}
         <section aria-labelledby="cars-heading">
           <div className="flex items-center justify-between mb-3">
-            <h2 id="cars-heading" className="text-base font-semibold">
+            <h2 id="cars-heading" className="text-base font-semibold flex items-center gap-1.5">
+              <Car size={14} className="text-faint" aria-hidden="true" />
               Xe đã ghép
-              <span className="text-faint font-normal ml-1.5 tnum">
+              <span className="text-faint font-normal tnum">
                 {trips.length}
               </span>
             </h2>
@@ -272,7 +290,7 @@ export default function DispatchBoard() {
             errorTitle="Không tải được danh sách chuyến"
             skeleton={
               <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-                <Skeleton className="h-52 w-full rounded-lg" count={3} />
+                <Skeleton className="h-52 w-full rounded-md" count={3} />
               </div>
             }
           >
@@ -299,10 +317,12 @@ export default function DispatchBoard() {
 }
 
 function Stat({
+  icon,
   label,
   value,
   tone,
 }: {
+  icon: ReactNode;
   label: string;
   value: string | number;
   /** Only applied when the number is non-zero — a `0` rendered in
@@ -315,12 +335,30 @@ function Stat({
       : tone === "success"
         ? "text-success"
         : "text-ink";
+  // The chip stays neutral until there's something to flag — same rule
+  // as the number itself, so the icon and the value never disagree.
+  const chip =
+    tone === "warning"
+      ? "bg-warning-subtle text-warning"
+      : tone === "success"
+        ? "bg-success-subtle text-success"
+        : "bg-sunken text-faint";
   return (
-    <div className="px-4 py-3">
-      <p className="text-2xs text-faint mb-1 uppercase tracking-wide">{label}</p>
-      <p className={`text-2xl font-semibold tnum leading-none ${color}`}>
-        {value}
-      </p>
+    <div className="px-4 py-3 flex items-center gap-3">
+      <span
+        className={`w-8 h-8 rounded-md flex items-center justify-center shrink-0 ${chip}`}
+        aria-hidden="true"
+      >
+        {icon}
+      </span>
+      <div className="min-w-0">
+        <p className="text-2xs text-faint mb-0.5 uppercase tracking-wide truncate">
+          {label}
+        </p>
+        <p className={`text-2xl font-semibold tnum leading-none ${color}`}>
+          {value}
+        </p>
+      </div>
     </div>
   );
 }

@@ -115,7 +115,7 @@ export default function FleetPage() {
         errorTitle="Không tải được đội xe"
         skeleton={
           <div className="space-y-3">
-            <Skeleton className="h-20 w-full rounded-lg" count={3} />
+            <Skeleton className="h-20 w-full rounded-md" count={3} />
           </div>
         }
         empty={
@@ -208,7 +208,12 @@ function VehicleRow({
 }) {
   const status = VEHICLE_STATUS[vehicle.status];
   return (
-    <Card className="p-4">
+    <Card
+      className="p-4"
+      // Neutral (offline) gets no rail — same "nothing to flag" rule
+      // the dispatch stats use, rather than inventing a grey accent.
+      accent={status.tone !== "neutral" ? status.tone : undefined}
+    >
       <div className="flex items-start justify-between gap-3 mb-3">
         <div>
           <div className="flex items-center gap-2">

@@ -20,7 +20,7 @@ export default function NotFoundPage() {
     <div className="min-h-screen bg-canvas flex items-center justify-center p-6">
       <div className="w-full max-w-sm text-center">
         <div
-          className="w-10 h-10 rounded-lg bg-sunken text-faint flex items-center justify-center mx-auto mb-3"
+          className="w-10 h-10 rounded-md bg-sunken text-faint flex items-center justify-center mx-auto mb-3"
           aria-hidden="true"
         >
           <Compass size={18} />

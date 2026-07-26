@@ -86,7 +86,7 @@ export default function DriverDashboard() {
         errorTitle="Không tải được chuyến của bạn"
         skeleton={
           <div className="space-y-4">
-            <Skeleton className="h-64 w-full rounded-lg" count={2} />
+            <Skeleton className="h-64 w-full rounded-md" count={2} />
           </div>
         }
         empty={

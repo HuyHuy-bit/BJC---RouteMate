@@ -1,7 +1,17 @@
 import { useMemo, useState } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Phone, Power, Trash2, UserPlus, Users } from "lucide-react";
+import {
+  ArrowLeft,
+  Car,
+  Phone,
+  Power,
+  Radio,
+  Shield,
+  Trash2,
+  UserPlus,
+  Users,
+} from "lucide-react";
 import { api } from "../lib/api";
 import { useAuth } from "../context/AuthContext";
 import type { UserOut } from "../types";
@@ -18,6 +28,12 @@ import Skeleton from "../components/ui/Skeleton";
 import { useToast } from "../components/ui/Toast";
 
 const ROLE_ORDER = ["admin", "dispatcher", "driver"] as const;
+
+const ROLE_ICON: Record<(typeof ROLE_ORDER)[number], JSX.Element> = {
+  admin: <Shield size={13} aria-hidden="true" />,
+  dispatcher: <Radio size={13} aria-hidden="true" />,
+  driver: <Car size={13} aria-hidden="true" />,
+};
 
 export default function EmployeesPage() {
   const toast = useToast();
@@ -97,7 +113,7 @@ export default function EmployeesPage() {
         errorTitle="Không tải được danh sách nhân viên"
         skeleton={
           <div className="space-y-2">
-            <Skeleton className="h-16 w-full rounded-lg" count={5} />
+            <Skeleton className="h-16 w-full rounded-md" count={5} />
           </div>
         }
         empty={
@@ -117,9 +133,10 @@ export default function EmployeesPage() {
           if (!list || list.length === 0) return null;
           return (
             <section key={role}>
-              <h2 className="text-xs font-medium text-faint mb-2 tracking-wide uppercase">
+              <h2 className="text-xs font-medium text-faint mb-2 tracking-wide uppercase flex items-center gap-1.5">
+                {ROLE_ICON[role]}
                 {ROLE_LABEL[role]}
-                <span className="ml-1.5 tnum">({list.length})</span>
+                <span className="tnum">({list.length})</span>
               </h2>
               <div className="space-y-2">
                 {list.map((u) => {

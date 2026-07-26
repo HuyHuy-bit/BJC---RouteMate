@@ -32,7 +32,7 @@ export default function Card({
   return (
     <Tag
       className={[
-        "bg-surface border border-line rounded-lg",
+        "bg-surface border border-line rounded-md",
         "shadow-xs",
         interactive ? "transition-shadow duration-base hover:shadow-md" : "",
         accent ? ACCENT_CLASS[accent] : "",

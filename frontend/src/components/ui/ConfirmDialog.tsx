@@ -76,7 +76,7 @@ export default function ConfirmDialog({
         aria-modal="true"
         aria-labelledby={titleId}
         aria-describedby={description ? descId : undefined}
-        className="relative bg-surface rounded-lg shadow-lg w-full max-w-sm p-5 animate-slide-up"
+        className="relative bg-surface rounded-md shadow-lg w-full max-w-sm p-5 animate-slide-up"
       >
         <h2 id={titleId} className="text-lg font-semibold text-ink">
           {title}
