@@ -193,8 +193,22 @@ export default function FleetStatusTable({ trips }: { trips: TripOut[] }) {
                   key={r.vehicle.id}
                   className="border-t border-line hover:bg-sunken transition-colors"
                 >
-                  <td className="px-4 py-2.5 text-sm font-medium whitespace-nowrap">
-                    {r.vehicle.label ?? r.vehicle.plate_number}
+                  {/* The plate leads, not the nickname. "Xe 1" is what
+                      the office calls it; the plate is what a
+                      dispatcher reads out on the phone, matches against
+                      paperwork, and can identify a car by when two of
+                      them are both called "Xe". The label stays
+                      underneath so this still cross-references the trip
+                      cards, which are labelled. */}
+                  <td className="px-4 py-2.5 whitespace-nowrap">
+                    <span className="block text-sm font-medium tnum">
+                      {r.vehicle.plate_number}
+                    </span>
+                    {r.vehicle.label && (
+                      <span className="block text-2xs text-faint">
+                        {r.vehicle.label}
+                      </span>
+                    )}
                   </td>
                   <td className="px-4 py-2.5 text-sm whitespace-nowrap">
                     {r.driverName ?? <span className="text-faint">—</span>}
