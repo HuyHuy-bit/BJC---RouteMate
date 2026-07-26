@@ -182,18 +182,25 @@ def run_dispatch_tick(
     return decisions
 
 
-def find_merge_candidate(
+def rank_merge_candidates(
     lonely: PoolSnapshot, others: list[PoolSnapshot]
-) -> PoolSnapshot | None:
+) -> list[PoolSnapshot]:
     """
-    Last resort before stranding an under-filled outbound pool: another
-    under-filled pool going the same way at a compatible time. Merging two
-    half-empty cars into one is the single most valuable action available
-    at deadline — it serves both sets of customers AND removes a vehicle
-    from the road.
+    Pools that could absorb an under-filled one at deadline, best first
+    (closest requested pickup time wins). Merging two half-empty cars
+    into one is the most valuable action available at deadline — it
+    serves both sets of customers AND removes a vehicle from the road.
+
+    These checks are all CHEAP ones — direction, privacy, seats, timing.
+    Whether the combined group can actually be DRIVEN inside the
+    per-passenger detour guarantee needs a real route solve, which this
+    pure function has no way to do. The caller must validate each
+    candidate before committing (see dispatch_service.can_merge_pools),
+    which is why this returns a ranked list rather than a single pick:
+    if the best candidate turns out to be un-routable, there may still
+    be a worse-but-workable one behind it.
     """
-    best: PoolSnapshot | None = None
-    best_gap = None
+    viable: list[tuple[float, PoolSnapshot]] = []
 
     for other in others:
         if other.pool_id == lonely.pool_id:
@@ -213,7 +220,7 @@ def find_merge_candidate(
                 other.earliest_requested_pickup - lonely.earliest_requested_pickup
             ).total_seconds()
         )
-        if best_gap is None or gap < best_gap:
-            best, best_gap = other, gap
+        viable.append((gap, other))
 
-    return best
+    viable.sort(key=lambda pair: pair[0])
+    return [snapshot for _gap, snapshot in viable]

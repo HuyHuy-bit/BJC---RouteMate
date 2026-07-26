@@ -43,7 +43,7 @@ from app.services.dispatch_engine import (
     SealDecision,
     departure_deadline,
     evaluate_pool,
-    find_merge_candidate,
+    rank_merge_candidates,
 )
 from app.services.pool_insertion import (
     PoolMember,
@@ -258,6 +258,21 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
                     if b.id == stop.booking_id:
                         b.stop_order = rank
         else:
+            # No ordering satisfies this group's schedule windows and
+            # detour caps. Every path that ADDS a booking validates
+            # first (evaluate_insertion when matching, can_merge_pools
+            # before a merge), so reaching here means the group changed
+            # underneath us some other way — a manual override, or
+            # baselines that shifted. Fall back to a naive route so the
+            # trip still has usable geometry, but say so loudly rather
+            # than letting a broken detour promise pass silently.
+            logger.warning(
+                "trip %s has no feasible stop ordering for its current %s "
+                "bookings — falling back to a naive route; the per-passenger "
+                "detour guarantee is NOT satisfied for this trip",
+                trip.id,
+                len(members),
+            )
             route = routing_service.route(
                 [c for m in members for c in (m.pickup, m.dropoff)]
             )
@@ -833,6 +848,48 @@ def merge_trips(
     )
 
 
+def can_merge_pools(db: Session, source: Trip, target: Trip) -> bool:
+    """
+    Whether two pools can actually be combined into one drivable car.
+
+    rank_merge_candidates only applies cheap filters (direction, seats,
+    timing) — it's a pure function with no access to road distances. So
+    without this check, a merge at deadline could silently produce a
+    route that breaks the per-passenger detour guarantee: the bookings
+    would already have moved, _refresh_pool_geometry would fail to find
+    a feasible ordering, and it would fall back to a naive
+    pickup-dropoff-pickup-dropoff route and just run it. That is the one
+    promise this system makes loudest to customers, waived at exactly
+    the moment things are already going wrong.
+
+    Validates through solve_group_ordering — the same exact search, with
+    the same schedule-window and detour pruning, that every other
+    matching decision goes through. Costs one routing matrix call, which
+    is cheap at deadline frequency and far cheaper than a broken promise.
+    """
+    source_members = [_to_member(b) for b in active_bookings(source)]
+    target_members = [_to_member(b) for b in active_bookings(target)]
+    # Both sides must still really have riders. The snapshots the caller
+    # ranks from are taken once at the top of a dispatch cycle, so a pool
+    # that was already merged away earlier in the SAME cycle still looks
+    # populated there — without this, a later pool could "merge" into
+    # that now-empty, cancelled trip.
+    if not source_members or not target_members:
+        return False
+
+    members = source_members + target_members
+    if any(m.solo_duration_seconds <= 0 for m in members):
+        return False  # missing baselines: can't verify, so don't risk it
+
+    # The merged group has to fit whichever of the two cars takes it.
+    capacity = min(trip_capacity(db, source), trip_capacity(db, target))
+    if sum(m.seats for m in members) > capacity:
+        return False
+
+    _total, ordered_stops, _offsets = solve_group_ordering(members)
+    return bool(ordered_stops)
+
+
 def extend_pool_wait(
     db: Session,
     trip: Trip,
@@ -1277,9 +1334,25 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
                 for tid, s in snapshots.items()
                 if tid != trip.id and s.passenger_count > 0
             ]
-            partner = find_merge_candidate(snap, others)
-            if partner is not None:
-                partner_trip = next(t for t in trips if t.id == partner.pool_id)
+            # Take the best candidate that can ACTUALLY be driven within
+            # the per-passenger detour guarantee — not merely the one
+            # with the closest pickup time. A candidate that fails
+            # validation doesn't block the others behind it.
+            partner_trip = None
+            for candidate in rank_merge_candidates(snap, others):
+                trip_candidate = next(
+                    (t for t in trips if t.id == candidate.pool_id), None
+                )
+                # Skip anything already merged away or sealed earlier in
+                # this same cycle — the ranked snapshots are from the top
+                # of the tick and don't reflect those changes.
+                if trip_candidate is None or trip_candidate.status != TripStatus.forming:
+                    continue
+                if can_merge_pools(db, trip, trip_candidate):
+                    partner_trip = trip_candidate
+                    break
+
+            if partner_trip is not None:
                 merge_trips(
                     db,
                     trip,
