@@ -19,19 +19,27 @@ import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 
-// `returning` is deliberately absent: it owns paired columns
-// (return_requested_at / requested_by) that only the return endpoints
-// maintain, so setting it from a plain status dropdown would produce a
-// car that is "returning" with no request behind it — exactly the
-// inconsistent state this workflow exists to avoid. Use the call-home
-// button instead.
+// Only the statuses a human legitimately decides.
+//
+// `assigned`, `on_trip` and `returning` are all SYSTEM-managed — they
+// mean "a trip owns this car" or "a return is outstanding", and the
+// code that sets them also maintains the thing that makes them true
+// (a trips row, or return_requested_at). Offering them in a dropdown
+// lets a dispatcher assert a commitment that doesn't exist, producing
+// a car dispatch will never pick — `_assign_vehicle` only considers
+// `available` — and that no UI can free again.
+//
+// That exact state was found in real data: a vehicle sitting in
+// `assigned` with no trip referencing it. Whatever put it there, the
+// dropdown should not be able to.
 const STATUS_OPTIONS: VehicleStatus[] = [
   "available",
-  "assigned",
-  "on_trip",
   "maintenance",
   "offline",
 ];
+
+/** System-managed states, shown but never hand-settable. */
+const SYSTEM_MANAGED: VehicleStatus[] = ["assigned", "on_trip", "returning"];
 
 export default function FleetPage() {
   const toast = useToast();
@@ -247,6 +255,7 @@ function VehicleRow({
   returnPending?: boolean;
 }) {
   const status = VEHICLE_STATUS[vehicle.status];
+  const systemManaged = SYSTEM_MANAGED.includes(vehicle.status);
 
   const place = placeFromLatLng(
     vehicle.last_location_lat,
@@ -340,11 +349,16 @@ function VehicleRow({
           accessibleName={`Trạng thái xe ${vehicle.plate_number}`}
           value={vehicle.status}
           pending={statusPending}
-          // A returning car's status isn't in the option list, so the
-          // control would silently misrepresent it. Locked while the
-          // return is outstanding; cancel it to change status.
-          disabled={vehicle.status === "returning"}
-          options={STATUS_OPTIONS.map((s) => ({
+          // Locked while a trip or a return owns the car. Its real
+          // status isn't among the options, so an enabled control
+          // would both misrepresent it and let one tap overwrite a
+          // real commitment. Free it by finishing the trip or
+          // cancelling the return.
+          disabled={systemManaged}
+          options={(systemManaged
+            ? [vehicle.status, ...STATUS_OPTIONS]
+            : STATUS_OPTIONS
+          ).map((s) => ({
             value: s,
             label: VEHICLE_STATUS[s].label,
           }))}

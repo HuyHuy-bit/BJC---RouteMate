@@ -173,6 +173,7 @@ def world(db):
         "tag": tag, "corridor": corridor, "admin": admin,
         "dispatcher": dispatcher, "driver": driver, "other_driver": other_driver,
         "vehicle": vehicle, "trip": trip, "booking": booking,
+        "customer": customer,
         "url": f"/api/v1/dispatch/trips/{trip.id}",
     }
 
@@ -463,6 +464,44 @@ def test_a_returning_car_is_not_dispatchable(client, db, world):
     db.rollback()
 
     assert picked is None or picked.id != vehicle.id
+
+
+def test_deleting_a_customer_does_not_strand_their_cars_vehicle(client, db, world):
+    """
+    Regression, found in live data: a vehicle sat in `assigned` with no
+    trip referencing it at all.
+
+    delete_customer removes any trip left with zero bookings, but never
+    handed the car back — and `_assign_vehicle` only ever picks a
+    vehicle whose status is `available`, so that car was invisible to
+    dispatch and impossible to free through the UI. Deleting the last
+    customer on a trip must release its vehicle on the way out.
+    """
+    # Ids captured up front: expunge_all below detaches these instances,
+    # after which reading an attribute off them raises.
+    vehicle_id = world["vehicle"].id
+    trip_id = world["trip"].id
+    customer_id = world["customer"].id
+
+    db.expire_all()
+    assert db.get(Vehicle, vehicle_id).status is VehicleStatus.assigned
+
+    r = client.delete(
+        f"/api/v1/customers/{customer_id}", headers=auth(world["dispatcher"])
+    )
+    assert r.status_code in (200, 204), r.text
+
+    # expunge_all, not expire_all: the deleted trip is still in this
+    # session's identity map, and refreshing it raises ObjectDeletedError
+    # rather than returning None.
+    db.expunge_all()
+    freed = db.query(Vehicle).filter(Vehicle.id == vehicle_id).one_or_none()
+    assert freed is not None, "the vehicle itself must never be deleted"
+    assert freed.status is VehicleStatus.available, (
+        "car left committed to a trip that no longer exists"
+    )
+    gone = db.query(Trip).filter(Trip.id == trip_id).one_or_none()
+    assert gone is None, "the emptied trip should be gone"
 
 
 def test_driver_can_find_their_own_car(client, world):

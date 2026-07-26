@@ -14,6 +14,7 @@ from app.models.trip import Trip
 from app.models.user import User
 from app.schemas.customer import CustomerOut
 from app.services.audit import log_pii_access
+from app.services.dispatch_service import release_vehicle_if_free
 
 router = APIRouter(tags=["customers"])
 
@@ -122,6 +123,18 @@ def delete_customer(
         if remaining == 0:
             trip = db.get(Trip, trip_id)
             if trip is not None:
+                # Hand the car back BEFORE the trip row goes, or it is
+                # stranded forever: _assign_vehicle only ever picks a
+                # vehicle whose status is `available`, and
+                # release_vehicle_if_free needs the trip row to work out
+                # whether anything else still holds it.
+                #
+                # Found in production data — a car sat in `assigned`
+                # with no trip referencing it at all, invisible to
+                # dispatch and impossible to free through the UI,
+                # because deleting a customer took its trip out from
+                # under it without ever releasing it.
+                release_vehicle_if_free(db, trip)
                 db.delete(trip)
 
     db.commit()
