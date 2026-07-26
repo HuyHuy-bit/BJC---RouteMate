@@ -7,6 +7,7 @@ from sqlalchemy.orm import Session
 from app.api.deps import require_role
 from app.db.session import get_db
 from app.models.enums import TripStatus, UserRole
+from app.models.payment import Payment
 from app.models.trip import Trip
 from app.models.user import User
 from app.models.vehicle import Vehicle
@@ -86,14 +87,16 @@ def delete_user(
     Deleting a staff account is a heavier action than deactivating one —
     it permanently frees their phone number for reuse, which deactivation
     deliberately does not do. Blocked while the account is operationally
-    live: currently assigned to a trip, or drove/was assigned one within
-    the last {DELETE_LOOKBACK_DAYS} days. Older accounts with no recent
-    activity are safe to remove outright.
+    live: currently assigned to a trip, drove/was assigned one within the
+    last {DELETE_LOOKBACK_DAYS} days, or collected money in that window.
+    Older accounts with no recent activity are safe to remove outright.
 
-    Both trips.driver_id and vehicles.default_driver_id are real foreign
-    keys to this table, so anything that survives the block check still
-    needs those references cleared before the row can actually be
+    trips.driver_id, vehicles.default_driver_id AND
+    payments.collected_by_user_id are all real foreign keys to this
+    table, so anything that survives the block check still needs every
+    one of those references cleared before the row can actually be
     deleted — same pattern as vehicle deletion clearing trip.vehicle_id.
+    Missing any one of them turns this endpoint into a 500.
     """
     user = db.get(User, user_id)
     if user is None:
@@ -128,9 +131,35 @@ def delete_user(
             ),
         )
 
+    # Money they handled recently counts as operationally live too — a
+    # cash record from this morning still needs a name against it while
+    # the day is being reconciled. Same cutoff as trips.
+    recent_payment = (
+        db.query(Payment)
+        .filter(Payment.collected_by_user_id == user.id)
+        .filter(Payment.collected_at >= cutoff)
+        .first()
+    )
+    if recent_payment is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"Nhân viên này đã thu tiền trong {DELETE_LOOKBACK_DAYS} ngày qua. "
+                "Hãy khoá tài khoản thay vì xoá."
+            ),
+        )
+
     db.query(Vehicle).filter(Vehicle.default_driver_id == user.id).update(
         {"default_driver_id": None}
     )
     db.query(Trip).filter(Trip.driver_id == user.id).update({"driver_id": None})
+    # payments.collected_by_user_id is a real foreign key, so an older
+    # collection record would otherwise block the delete outright with a
+    # 500. Cleared like trips.driver_id above; the payment itself and its
+    # amount are preserved, and dispatch_events/audit_log keep the
+    # historical actor since neither constrains against this table.
+    db.query(Payment).filter(Payment.collected_by_user_id == user.id).update(
+        {"collected_by_user_id": None}
+    )
     db.delete(user)
     db.commit()

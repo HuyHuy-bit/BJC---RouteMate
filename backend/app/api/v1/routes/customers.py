@@ -8,6 +8,8 @@ from app.db.session import get_db
 from app.models.booking import Booking
 from app.models.customer import Customer
 from app.models.enums import UserRole
+from app.models.notification import Notification
+from app.models.payment import Payment
 from app.models.trip import Trip
 from app.models.user import User
 from app.schemas.customer import CustomerOut
@@ -95,6 +97,21 @@ def delete_customer(
 
     bookings = db.query(Booking).filter(Booking.customer_id == customer.id).all()
     affected_trip_ids = {b.trip_id for b in bookings if b.trip_id is not None}
+    booking_ids = [b.id for b in bookings]
+
+    # Anything that references those bookings has to go first, or the
+    # delete below fails on a foreign key and the whole request 500s.
+    # Both of these tables point at bookings.id: notifications (the
+    # manual-relay message queue) and payments (one row per booking,
+    # created automatically at booking time — so in practice EVERY
+    # customer has at least one).
+    if booking_ids:
+        db.query(Notification).filter(
+            Notification.booking_id.in_(booking_ids)
+        ).delete(synchronize_session=False)
+        db.query(Payment).filter(
+            Payment.booking_id.in_(booking_ids)
+        ).delete(synchronize_session=False)
 
     db.query(Booking).filter(Booking.customer_id == customer.id).delete()
     db.delete(customer)
