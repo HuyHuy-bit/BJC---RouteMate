@@ -58,14 +58,17 @@ LATE_PICKUP_TOLERANCE_MINUTES = 15
 # to depart or escalate.
 MAX_POOL_WAIT_MINUTES = 45
 
-# NOT IMPLEMENTED — read by nothing. Left here as a marker for intended
-# future work, NOT as a knob you can turn: changing it has no effect
-# whatsoever today, and rush hour is dispatched exactly like a quiet
-# Tuesday. Making it real needs a business decision this code can't
-# make for itself — which clock hours count as peak, and whether the
-# trigger should be time-of-day at all rather than live demand density.
-# Wire it into dispatch_engine.departure_deadline when that's decided.
-PEAK_POOL_WAIT_MINUTES = 20  # unused
+# --- Rush hour ---
+# Peak doesn't change how long a pool WAITS to fill — it changes how
+# long the drive takes. See app/services/traffic.py. Hours are LOCAL
+# clock hours, half-open [start, end): (17, 19) means 17:00–18:59.
+LOCAL_TIMEZONE = "Asia/Ho_Chi_Minh"
+PEAK_HOURS_LOCAL = ((17, 19),)
+
+# How much longer the same route takes during those hours. 1.3 = 30%
+# longer. A starting estimate, not a measurement — worth revisiting
+# against real completed-trip durations once there's a season of them.
+PEAK_TRAVEL_MULTIPLIER = 1.3
 
 # --- Return-leg vehicle reuse ---
 # A vehicle finishing its outbound run is treated as a candidate for a

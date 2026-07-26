@@ -55,6 +55,7 @@ from app.services.pool_insertion import (
     solve_group_ordering,
 )
 from app.services.reclustering import cluster_by_proximity, time_cluster
+from app.services.traffic import travel_multiplier
 from app.services.routing import routing_service
 from app.services.notification_service import (
     notify_trip_disrupted,
@@ -221,8 +222,14 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
         m = members[0]
         route = routing_service.route([m.pickup, m.dropoff])
         active[0].stop_order = 1
+        # Rush hour lengthens a solo run exactly like a shared one — the
+        # geometry (distance, polyline) is unchanged, only the time is.
         offsets = {
-            m.booking_id: {"pickup": 0.0, "dropoff": route.total_duration_seconds}
+            m.booking_id: {
+                "pickup": 0.0,
+                "dropoff": route.total_duration_seconds
+                * travel_multiplier(_as_utc(m.requested_pickup_at)),
+            }
         }
     elif vehicle_position is not None:
         _total, ordered_stops, position_offsets = best_ordering_from_position(

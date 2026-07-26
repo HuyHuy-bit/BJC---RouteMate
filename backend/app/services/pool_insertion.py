@@ -38,6 +38,7 @@ from app.core.dispatch_config import (
 )
 from app.services.geo import haversine_m
 from app.services.route_solver import solve_pdp
+from app.services.traffic import travel_multiplier
 from app.services.routing import Coord, routing_service
 
 # Beyond this straight-line gap there is no plausible road route worth
@@ -220,8 +221,14 @@ def _best_ordering(
     kinds = [s.kind for s in stops]
     owners = [s.booking_id for s in stops]
 
+    # Rush hour makes the same roads slower. Scale every leg — and, in
+    # the detour check below, the solo baseline it's measured against —
+    # by the same factor, so ETAs get realistic without the detour
+    # subtraction quietly losing its meaning. See traffic.py.
+    slowdown = travel_multiplier(trip_start)
+
     def cost(i: int, j: int) -> float:
-        return durations[
+        return slowdown * durations[
             (index[(stops[i].booking_id, stops[i].kind)],
              index[(stops[j].booking_id, stops[j].kind)])
         ]
@@ -249,10 +256,14 @@ def _best_ordering(
             # Dropoff: reject if THIS rider's own in-car time would blow
             # their detour cap — boarded_at[owner] is exactly their own
             # pickup's arrival (including any wait), maintained by
-            # solve_pdp in lockstep with the search itself.
+            # solve_pdp in lockstep with the search itself. The stored
+            # baseline is a free-flow number, so it gets the same
+            # slowdown as the legs it's being compared with.
             boarded = boarded_at.get(stop.booking_id)
             if boarded is not None:
-                solo = member_by_id[stop.booking_id].solo_duration_seconds
+                solo = (
+                    member_by_id[stop.booking_id].solo_duration_seconds * slowdown
+                )
                 if (arrival_seconds - boarded) - solo > max_detour_seconds:
                     return False, 0.0
             return True, 0.0
@@ -298,11 +309,18 @@ def best_ordering_from_position(
     kinds = [s.kind for s in stops]
     owners = [s.booking_id for s in stops]
 
+    # Same rush-hour slowdown as every other route computation, applied
+    # to the deadhead leg too — driving out to the first pickup is no
+    # faster in traffic than the rest of the run.
+    slowdown = travel_multiplier(
+        min(_as_utc(m.requested_pickup_at) for m in members)
+    )
+
     def cost(i: int, j: int) -> float:
-        return durations[(i + 1, j + 1)]
+        return slowdown * durations[(i + 1, j + 1)]
 
     def start_cost(i: int) -> float:
-        return durations[(0, i + 1)]
+        return slowdown * durations[(0, i + 1)]
 
     total, order, arrivals = solve_pdp(kinds, owners, cost, start_cost=start_cost)
     ordered_stops = [stops[i] for i in order]
@@ -458,15 +476,25 @@ def evaluate_insertion(
     # within MAX_PASSENGER_DETOUR_MINUTES by construction (Stage 3), this
     # is purely descriptive now: feeding detour_term below and the
     # returned worst_detour_minutes, not a second accept/reject gate.
+    # Every route number below came out of a search scaled for rush-hour
+    # slowdown, so each stored (free-flow) baseline it gets compared
+    # against has to be scaled the same way — otherwise a peak-hour trip
+    # would look like it had a huge detour purely because traffic was
+    # priced into one side of the subtraction and not the other.
+    slowdown = travel_multiplier(trip_start)
+
     detours: dict[UUID, float] = {}
     for m in everyone:
         off = offsets[m.booking_id]
         in_car = off["dropoff"] - off["pickup"]
-        detours[m.booking_id] = (in_car - m.solo_duration_seconds) / 60.0
+        detours[m.booking_id] = (
+            in_car - m.solo_duration_seconds * slowdown
+        ) / 60.0
     worst_detour = max(detours.values()) if detours else 0.0
 
     if best_total / 60.0 > (
-        max(m.solo_duration_seconds for m in everyone) / 60.0 + MAX_POOL_DETOUR_MINUTES
+        max(m.solo_duration_seconds for m in everyone) * slowdown / 60.0
+        + MAX_POOL_DETOUR_MINUTES
     ):
         return InsertionResult(False, "pool route too long overall")
 
@@ -477,7 +505,9 @@ def evaluate_insertion(
     # feasible/score/reason only), at the cost of one API request per
     # candidate evaluated. The trip's real geometry is fetched once when
     # it's actually committed, in _refresh_pool_geometry.
-    solo_baseline = candidate.solo_duration_seconds
+    # Same reasoning: added_seconds is a scaled figure, so the baseline
+    # it's expressed as a fraction of has to be scaled too.
+    solo_baseline = candidate.solo_duration_seconds * slowdown
     baseline_total, _baseline_order, baseline_offsets = _best_ordering(
         members, durations, index, trip_start
     )
@@ -554,11 +584,18 @@ def solve_group_ordering(
     if not members:
         return 0.0, [], {}
     if len(members) == 1:
+        # A lone rider skips the search — but must NOT skip the
+        # rush-hour slowdown with it, or a solo trip departing at 17:30
+        # gets quoted a free-flow arrival time while a shared one
+        # doesn't. This branch is the common case (every pool starts
+        # here), so missing it made the whole feature invisible in
+        # practice.
         m = members[0]
-        leg = routing_service.leg(m.pickup, m.dropoff)
+        slowdown = travel_multiplier(_as_utc(m.requested_pickup_at))
+        duration = routing_service.leg(m.pickup, m.dropoff).duration_seconds * slowdown
         stops = [Stop(m.booking_id, "pickup", m.pickup), Stop(m.booking_id, "dropoff", m.dropoff)]
-        offsets = {m.booking_id: {"pickup": 0.0, "dropoff": leg.duration_seconds}}
-        return leg.duration_seconds, stops, offsets
+        offsets = {m.booking_id: {"pickup": 0.0, "dropoff": duration}}
+        return duration, stops, offsets
 
     coords: list[Coord] = []
     index: dict[tuple[UUID, str], int] = {}
