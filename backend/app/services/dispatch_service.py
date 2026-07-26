@@ -37,7 +37,13 @@ from app.models.enums import (
     VehicleStatus,
 )
 from app.models.trip import Trip
+from app.models.user import User
 from app.models.vehicle import Vehicle
+from app.services.trip_state import (
+    DRIVER_ACTIVE_STATUSES,
+    VEHICLE_COMMITTED_STATUSES,
+    apply_transition,
+)
 from app.services.dispatch_engine import (
     PoolSnapshot,
     SealDecision,
@@ -404,7 +410,11 @@ def find_returning_vehicle(db: Session, booking: Booking) -> Vehicle | None:
         db.execute(
             select(Trip)
             .where(Trip.direction == BookingDirection.outbound)
-            .where(Trip.status.in_([TripStatus.assigned, TripStatus.in_progress]))
+            # Any outbound run still under way — a driver who has
+            # accepted but not departed, or one whose completion is
+            # awaiting sign-off, is just as much "coming back this way"
+            # as one mid-route.
+            .where(Trip.status.in_(DRIVER_ACTIVE_STATUSES))
             .where(Trip.vehicle_id.isnot(None))
             # A van finishing an outbound run on a different corridor
             # isn't "going back the same way" this return passenger
@@ -428,7 +438,7 @@ def find_returning_vehicle(db: Session, booking: Booking) -> Vehicle | None:
             .where(Trip.direction == BookingDirection.return_leg)
             .where(
                 Trip.status.in_(
-                    [TripStatus.forming, TripStatus.assigned, TripStatus.in_progress]
+                    [TripStatus.forming, *DRIVER_ACTIVE_STATUSES]
                 )
             )
             .where(Trip.vehicle_id.isnot(None))
@@ -464,7 +474,20 @@ def find_returning_vehicle(db: Session, booking: Booking) -> Vehicle | None:
 
         if best_gap_minutes is None or abs(gap_minutes) < abs(best_gap_minutes):
             candidate = db.get(Vehicle, trip.vehicle_id)
-            if candidate is not None and candidate.status == VehicleStatus.on_trip:
+            # `assigned` counts as well as `on_trip`: a car committed to
+            # an outbound run that hasn't pulled away yet is just as
+            # much "coming back this way" as one already moving.
+            #
+            # Required by the split of on_trip into assigned/on_trip in
+            # this same change — a committed-but-not-departed car used
+            # to be `on_trip` and matched here. Without this, every
+            # outbound trip whose driver hadn't pressed Start would
+            # silently stop offering its return leg, which is most of
+            # them at the moment a return booking is placed.
+            if candidate is not None and candidate.status in (
+                VehicleStatus.assigned,
+                VehicleStatus.on_trip,
+            ):
                 best_vehicle = candidate
                 best_gap_minutes = gap_minutes
 
@@ -588,7 +611,11 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
         if (
             reserved is not None
             and reserved.status
-            in (VehicleStatus.available, VehicleStatus.on_trip)
+            in (
+                VehicleStatus.available,
+                VehicleStatus.assigned,
+                VehicleStatus.on_trip,
+            )
             # A reservation made when the pool was smaller must still
             # actually fit it now — pools keep accreting bookings after
             # a vehicle is earmarked (find_returning_vehicle reserves at
@@ -598,7 +625,9 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
             trip.vehicle_label = reserved.label or reserved.plate_number
             if trip.driver_id is None and reserved.default_driver_id:
                 trip.driver_id = reserved.default_driver_id
-            reserved.status = VehicleStatus.on_trip
+            # Committed, not yet moving — it becomes on_trip when the
+            # driver actually starts. See docs/STATE_MACHINE.md §4.
+            reserved.status = VehicleStatus.assigned
             return reserved
         # Reservation no longer usable (pulled into maintenance since
         # being earmarked, or the pool outgrew it) — fall through to a
@@ -624,6 +653,21 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
         # this, a 4-seat pool could be handed a car too small for it and
         # only fail later at the database's capacity trigger.
         .where(Vehicle.seat_capacity >= required_seats)
+        # Row-lock each candidate as it's considered, and step over any
+        # row another transaction is already holding.
+        #
+        # Without this, two concurrent seals — the scheduled dispatch
+        # cycle and a dispatcher's manual force-seal, or simply two
+        # pools sealing in the same tick — could both read the same car
+        # as `available` and both commit it. Nothing downstream would
+        # catch it: the capacity trigger guards seats within one trip,
+        # not one car across two trips.
+        #
+        # SKIP LOCKED rather than plain FOR UPDATE because a contended
+        # car should send this search to the next-best vehicle
+        # immediately, not block the whole dispatch cycle waiting to
+        # discover the car was taken.
+        .with_for_update(skip_locked=True)
     )
     if trip.centroid is not None:
         stale_cutoff = datetime.now(timezone.utc) - timedelta(
@@ -651,7 +695,7 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
     if vehicle is None:
         return None
 
-    vehicle.status = VehicleStatus.on_trip
+    vehicle.status = VehicleStatus.assigned
     trip.vehicle_id = vehicle.id
     trip.vehicle_label = vehicle.label or vehicle.plate_number
     if trip.driver_id is None and vehicle.default_driver_id:
@@ -705,21 +749,19 @@ def release_vehicle_if_free(db: Session, trip: Trip) -> None:
         db.query(Trip)
         .filter(Trip.vehicle_id == trip.vehicle_id)
         .filter(Trip.id != trip.id)
-        .filter(
-            Trip.status.in_(
-                [
-                    TripStatus.sealed,
-                    TripStatus.assigned,
-                    TripStatus.in_progress,
-                    TripStatus.reassigning,
-                ]
-            )
-        )
+        .filter(Trip.status.in_(VEHICLE_COMMITTED_STATUSES))
         .first()
     )
     if still_committed is None:
         vehicle = db.get(Vehicle, trip.vehicle_id)
-        if vehicle is not None and vehicle.status == VehicleStatus.on_trip:
+        # Release from `assigned` too, not just `on_trip`. A trip
+        # cancelled before it ever departed leaves its car earmarked but
+        # never driven — checking only for on_trip would strand that car
+        # as permanently unavailable.
+        if vehicle is not None and vehicle.status in (
+            VehicleStatus.assigned,
+            VehicleStatus.on_trip,
+        ):
             vehicle.status = VehicleStatus.available
 
 
@@ -773,7 +815,17 @@ def detach_booking_from_trip(
     ]
 
     if not remaining:
-        old_trip.status = TripStatus.cancelled
+        # A system cascade, not the actor's own decision: whoever
+        # cancelled a single booking did not ask for the whole trip to
+        # be dissolved, that just follows from it being the last one.
+        # The audit event below still records who triggered it.
+        apply_transition(
+            db,
+            old_trip,
+            TripStatus.cancelled,
+            actor=None,
+            reason=f"{reason} — last passenger removed",
+        )
         release_vehicle_if_free(db, old_trip)
         log_event(
             db,
@@ -802,16 +854,30 @@ def detach_booking_from_trip(
 
 
 def seal_trip(
-    db: Session, trip: Trip, now: datetime, reason: str
+    db: Session, trip: Trip, now: datetime, reason: str, actor: User | None = None
 ) -> Vehicle | None:
     """
     The actual seal action — commit a vehicle, lock the route, notify
     riders. Shared by the automatic dispatch cycle and the manual
     force-seal override, so both paths behave identically instead of
     the override being a second, subtly different implementation.
+
+    Also the retry path: called again each cycle tick for trips left in
+    `sealed` (no car was free) or `reassigning` (the car broke down).
     """
     vehicle = _assign_vehicle(db, trip)
     if vehicle is None:
+        # The pool has decided to depart; the fleet just has nothing to
+        # send. That is a distinct situation from "still gathering
+        # riders" and now has its own state instead of being invisible.
+        # A trip already in `sealed` or `reassigning` stays put — this
+        # is a retry that didn't find anything either.
+        if trip.status is TripStatus.forming:
+            apply_transition(
+                db, trip, TripStatus.sealed, actor=actor, reason=reason, now=now
+            )
+            trip.sealed_at = now
+            _refresh_pool_geometry(db, trip)
         log_event(
             db,
             DispatchEventType.pool_sealed,
@@ -820,13 +886,13 @@ def seal_trip(
         )
         return None
 
-    trip.status = TripStatus.assigned
+    # Both `forming -> assigned` (sealed and crewed in one step) and
+    # `sealed -> assigned` (a car finally came free) land here, as does
+    # `reassigning -> assigned` after a breakdown.
+    apply_transition(db, trip, TripStatus.assigned, actor=actor, reason=reason, now=now)
     trip.sealed_at = now
     # Refreshes geometry AND writes real per-stop ETAs in one pass.
     _refresh_pool_geometry(db, trip)
-    for b in trip.bookings:
-        if b.status == BookingStatus.matched:
-            b.status = BookingStatus.locked
 
     notify_trip_sealed(db, trip)
 
@@ -859,7 +925,11 @@ def merge_trips(
             # reads it two lines down. See assign_booking for the same
             # bug in its original form.
             b.trip = target
-    source.status = TripStatus.cancelled
+    # The source pool is empty by now — every active booking was just
+    # moved to `target` — so the cancel cascade has nothing to waive.
+    apply_transition(
+        db, source, TripStatus.cancelled, actor=None, reason=f"absorbed into {target.id}"
+    )
     db.flush()
     _refresh_pool_geometry(db, target)
     log_event(
@@ -958,8 +1028,8 @@ def upgrade_to_private(
     Re-prices the booking at the private rate and seals immediately: a
     private hire is its own car by definition, so there is nothing left
     to wait for. Returns the committed vehicle, or None if the fleet is
-    fully busy (the trip then stays forming and is retried like any
-    other under-vehicled pool).
+    fully busy — the trip then sits in `sealed` and is retried on every
+    dispatch tick like any other pool waiting on a car.
     """
     active = active_bookings(trip)
     if len(active) != 1:
@@ -1182,7 +1252,13 @@ def recluster_forming_pools(db: Session, now: datetime) -> int:
                 .count()
             )
             if remaining == 0:
-                trip.status = TripStatus.cancelled
+                apply_transition(
+                    db,
+                    trip,
+                    TripStatus.cancelled,
+                    actor=None,
+                    reason="emptied by reclustering",
+                )
 
         for trip in touched_trips:
             if trip.status == TripStatus.forming:
@@ -1212,7 +1288,7 @@ def report_trip_disrupted(
     trip: Trip,
     reason: str,
     notes: str | None,
-    actor_user_id: UUID | None,
+    actor: User | None,
 ) -> Trip:
     """
     A driver or dispatcher reports a trip can't continue as assigned —
@@ -1230,7 +1306,9 @@ def report_trip_disrupted(
     every tick (see below), same as an under-vehicled forming pool.
     """
     old_vehicle_id = trip.vehicle_id
-    trip.status = TripStatus.reassigning
+    apply_transition(
+        db, trip, TripStatus.reassigning, actor=actor, reason=reason
+    )
     trip.vehicle_id = None
     trip.driver_id = None
     trip.vehicle_label = None
@@ -1251,7 +1329,7 @@ def report_trip_disrupted(
         DispatchEventType.driver_rejected,
         trip_id=trip.id,
         vehicle_id=old_vehicle_id,
-        actor_user_id=actor_user_id,
+        actor_user_id=actor.id if actor is not None else None,
         reason=reason,
         details={"notes": notes} if notes else None,
     )
@@ -1331,6 +1409,25 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
     for trip in stuck_reassigning:
         if seal_trip(db, trip, now, reason="vehicle freed up after driver-reported issue"):
             reassigned += 1
+
+    # Pools that already decided to depart but had no car at the time.
+    # They are no longer `forming`, so the evaluation loop below will
+    # never look at them — without this they would sit in `sealed`
+    # forever, which is precisely the trap that made `sealed`
+    # unreachable in the first place.
+    awaiting_vehicle = (
+        db.execute(
+            select(Trip)
+            .where(Trip.status == TripStatus.sealed)
+            .where(Trip.vehicle_id.is_(None))
+        )
+        .scalars()
+        .all()
+    )
+    crewed = 0
+    for trip in awaiting_vehicle:
+        if seal_trip(db, trip, now, reason="vehicle freed up for a waiting pool"):
+            crewed += 1
 
     trips = (
         db.execute(select(Trip).where(Trip.status == TripStatus.forming))
@@ -1413,7 +1510,17 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
         "merged": merged,
         "blocked_no_vehicle": no_vehicle,
         "reassigned": reassigned,
+        "crewed_from_waiting": crewed,
     }
-    if newly_matched or reclustered or sealed or escalated or merged or no_vehicle or reassigned:
+    if (
+        newly_matched
+        or reclustered
+        or sealed
+        or escalated
+        or merged
+        or no_vehicle
+        or reassigned
+        or crewed
+    ):
         logger.info("dispatch cycle: %s", summary)
     return summary

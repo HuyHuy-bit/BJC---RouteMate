@@ -86,10 +86,20 @@ def adjust_payment(
     booking_id: uuid.UUID,
     payload: PaymentAdjust,
     db: Session = Depends(get_db),
-    current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
+    current_user: User = Depends(require_role(UserRole.admin)),
 ):
-    """Staff-only correction — waiving a fare, or resolving a disputed
-    one after following up with the driver/customer."""
+    """
+    Admin-only correction — waiving a fare, or resolving a disputed one
+    after following up with the driver/customer.
+
+    Dispatchers lost this. Writing off money owed is a financial
+    decision, not an operational one: it changes what the business
+    actually earned, and it is the single endpoint in this service that
+    can make a debt disappear without anyone collecting anything.
+    Dispatchers still see fares and payment status, because they
+    coordinate the drivers who collect the cash — they just cannot
+    forgive it.
+    """
     booking = _load_booking_with_payment(db, booking_id)
 
     payment = booking.payment

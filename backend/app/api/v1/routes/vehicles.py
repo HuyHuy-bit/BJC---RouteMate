@@ -3,12 +3,13 @@ from datetime import datetime, timezone
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from geoalchemy2.elements import WKTElement
+from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Session
 
 from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.corridor import Corridor
-from app.models.enums import TripStatus, UserRole
+from app.models.enums import UserRole
 from app.models.trip import Trip
 from app.models.user import User
 from app.models.vehicle import Vehicle
@@ -18,6 +19,10 @@ from app.schemas.vehicle import (
     VehicleOut,
     VehicleUpdate,
 )
+from app.services.trip_state import (
+    DRIVER_ACTIVE_STATUSES,
+    VEHICLE_COMMITTED_STATUSES,
+)
 
 router = APIRouter(tags=["vehicles"])
 
@@ -25,12 +30,33 @@ router = APIRouter(tags=["vehicles"])
 # real passengers — those states mean people are relying on this specific
 # car. Anything else (never used, or only tied to trips already finished
 # or cancelled) is safe to remove.
-BLOCKING_TRIP_STATUSES = [
-    TripStatus.sealed,
-    TripStatus.assigned,
-    TripStatus.in_progress,
-    TripStatus.reassigning,
-]
+#
+# Sourced from trip_state rather than spelled out again here: this list
+# and three others like it were maintained by hand, so a new state was
+# added to the enum and silently omitted from all of them.
+BLOCKING_TRIP_STATUSES = list(VEHICLE_COMMITTED_STATUSES)
+
+
+def to_vehicle_out(vehicle: Vehicle) -> VehicleOut:
+    """last_location is a PostGIS Geography, which Pydantic's
+    from_attributes cannot read — hence the explicit unpack rather than
+    model_validate on its own."""
+    lat = lng = None
+    if vehicle.last_location is not None:
+        point = to_shape(vehicle.last_location)
+        lat, lng = point.y, point.x
+    return VehicleOut(
+        id=vehicle.id,
+        plate_number=vehicle.plate_number,
+        label=vehicle.label,
+        seat_capacity=vehicle.seat_capacity,
+        status=vehicle.status,
+        default_driver_id=vehicle.default_driver_id,
+        home_corridor_id=vehicle.home_corridor_id,
+        last_location_at=vehicle.last_location_at,
+        last_location_lat=lat,
+        last_location_lng=lng,
+    )
 
 
 @router.get("", response_model=list[VehicleOut])
@@ -38,7 +64,10 @@ def list_vehicles(
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
 ):
-    return db.query(Vehicle).order_by(Vehicle.plate_number).all()
+    return [
+        to_vehicle_out(v)
+        for v in db.query(Vehicle).order_by(Vehicle.plate_number).all()
+    ]
 
 
 @router.post("", response_model=VehicleOut, status_code=status.HTTP_201_CREATED)
@@ -82,7 +111,7 @@ def create_vehicle(
     db.add(vehicle)
     db.commit()
     db.refresh(vehicle)
-    return vehicle
+    return to_vehicle_out(vehicle)
 
 
 @router.patch("/{vehicle_id}", response_model=VehicleOut)
@@ -107,7 +136,7 @@ def update_vehicle(
         vehicle.last_location_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(vehicle)
-    return vehicle
+    return to_vehicle_out(vehicle)
 
 
 @router.post("/{vehicle_id}/location", response_model=VehicleOut)
@@ -136,7 +165,7 @@ def report_location(
         and db.query(Trip)
         .filter(Trip.vehicle_id == vehicle_id)
         .filter(Trip.driver_id == current_user.id)
-        .filter(Trip.status.in_([TripStatus.assigned, TripStatus.in_progress]))
+        .filter(Trip.status.in_(DRIVER_ACTIVE_STATUSES))
         .first()
         is not None
     )
@@ -150,7 +179,7 @@ def report_location(
     vehicle.last_location_at = datetime.now(timezone.utc)
     db.commit()
     db.refresh(vehicle)
-    return vehicle
+    return to_vehicle_out(vehicle)
 
 
 @router.delete("/{vehicle_id}", status_code=status.HTTP_204_NO_CONTENT)

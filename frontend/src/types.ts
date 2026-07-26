@@ -13,15 +13,18 @@ export type TripStatus =
   | "forming"
   | "sealed"
   | "assigned"
+  | "driver_accepted"
   | "in_progress"
+  | "completion_requested"
   | "completed"
   | "cancelled"
   | "reassigning";
 export type VehicleStatus =
   | "available"
+  | "assigned"
   | "on_trip"
   | "maintenance"
-  | "inactive";
+  | "offline";
 
 export interface UserOut {
   id: string;
@@ -121,11 +124,40 @@ export interface TripOut {
   created_at: string;
   completed_at: string | null;
   cancelled_at: string | null;
+  driver_accepted_at: string | null;
+  completion_requested_at: string | null;
+  finalized_at: string | null;
+  finalized_by_user_id: string | null;
+  /**
+   * Which transitions the CURRENT user may make on this trip, straight
+   * from the backend's transition table. Render actions from this
+   * rather than from a local status->buttons map: the old map is how
+   * the dispatch board came to show "Bắt đầu chuyến" and "Hoàn thành
+   * chuyến" buttons that only a driver is allowed to press.
+   */
+  available_actions: TripStatus[];
 }
 
 export interface MatchingRunResult {
   trips_created: number;
   trips: TripOut[];
+}
+
+/**
+ * Admin-only money view. Deliberately not part of TripOut or any
+ * dispatcher-facing payload — see requirements §3.
+ */
+export interface RevenueSummary {
+  period_start: string;
+  period_end: string;
+  trips_finalized: number;
+  passengers_carried: number;
+  seats_carried: number;
+  expected_vnd: number;
+  collected_vnd: number;
+  outstanding_vnd: number;
+  disputed_vnd: number;
+  waived_vnd: number;
 }
 
 export interface GeocodeResult {
@@ -149,6 +181,8 @@ export interface VehicleOut {
   default_driver_id: string | null;
   home_corridor_id: string | null;
   last_location_at: string | null;
+  last_location_lat: number | null;
+  last_location_lng: number | null;
 }
 
 export interface VehicleLocationPing {

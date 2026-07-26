@@ -1,4 +1,4 @@
-import { useId, useRef } from "react";
+import { useId, useRef, type ReactNode } from "react";
 import Button from "./Button";
 import { useFocusTrap } from "../../lib/useFocusTrap";
 
@@ -19,6 +19,8 @@ export default function ConfirmDialog({
   confirmLabel = "Xoá",
   cancelLabel = "Huỷ",
   loading = false,
+  confirmDisabled = false,
+  children,
   onConfirm,
   onCancel,
 }: {
@@ -28,6 +30,10 @@ export default function ConfirmDialog({
   confirmLabel?: string;
   cancelLabel?: string;
   loading?: boolean;
+  /** For confirmations that need input before they're valid — e.g. the
+   *  reason a dispatcher is sending a completion claim back. */
+  confirmDisabled?: boolean;
+  children?: ReactNode;
   onConfirm: () => void;
   onCancel: () => void;
 }) {
@@ -80,6 +86,7 @@ export default function ConfirmDialog({
             {description}
           </p>
         )}
+        {children && <div className="mt-4">{children}</div>}
         <div className="flex gap-2 justify-end mt-5">
           <Button
             ref={cancelRef}
@@ -89,7 +96,12 @@ export default function ConfirmDialog({
           >
             {cancelLabel}
           </Button>
-          <Button variant="danger" onClick={onConfirm} loading={loading}>
+          <Button
+            variant="danger"
+            onClick={onConfirm}
+            loading={loading}
+            disabled={confirmDisabled}
+          >
             {confirmLabel}
           </Button>
         </div>

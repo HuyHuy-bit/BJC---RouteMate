@@ -200,15 +200,25 @@ def test_oversized_matrix_is_chunked_not_sent_as_one_failing_request():
     original = routing_service._fetch_matrix_chunk
 
     def recording(origins, destinations):
+        # Record the shape, then return a synthetic block of the right
+        # size. It used to delegate to `original`, which fired a real
+        # HTTPS request at the Goong API for every chunk — so without a
+        # paid key the 403 propagated out of _fetch_matrix and NOT ONE
+        # of the assertions below ever ran, and with a key the suite
+        # burned live quota on every execution.
+        #
+        # Nothing here needs the network: the chunk-splitting arithmetic
+        # under test happens before any request, and is fully observable
+        # from `sizes` plus the shape of the reassembled result.
         sizes.append(len(origins) * len(destinations))
-        return original(origins, destinations)
+        return [[1.0] * len(destinations) for _ in origins]
 
     routing_service._fetch_matrix_chunk = recording
     routing_service._cache._data.clear()
     try:
-        # Bypass the degraded-mode fixture for this one assertion: we're
-        # testing the chunk-splitting arithmetic, which happens before
-        # any network call and is what _fetch_matrix owns.
+        # Calls _fetch_matrix directly rather than going through the
+        # degraded-mode fixture, because chunk splitting is what
+        # _fetch_matrix itself owns.
         result = routing_service._fetch_matrix(pts, pts)
     finally:
         routing_service._fetch_matrix_chunk = original

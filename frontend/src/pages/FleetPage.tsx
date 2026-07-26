@@ -21,9 +21,10 @@ import { getErrorMessage } from "../lib/errors";
 
 const STATUS_OPTIONS: VehicleStatus[] = [
   "available",
+  "assigned",
   "on_trip",
   "maintenance",
-  "inactive",
+  "offline",
 ];
 
 export default function FleetPage() {

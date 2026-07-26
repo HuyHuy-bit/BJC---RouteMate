@@ -10,6 +10,7 @@ import type {
   NotificationOut,
   PaymentCollect,
   PaymentOut,
+  RevenueSummary,
   TokenPair,
   TripOut,
   TripReportIssue,
@@ -103,6 +104,20 @@ export const api = {
       apiClient
         .patch<TripOut>(`/dispatch/trips/${tripId}/status`, { status })
         .then((r) => r.data),
+    /**
+     * Named workflow actions. `path` comes from TRIP_ACTION /
+     * tripActionFor in lib/format, which is itself keyed off the
+     * backend's `available_actions` — so the UI can only ever call
+     * something the server has already said this user may do.
+     */
+    action: (tripId: string, path: string, body?: unknown) =>
+      apiClient
+        .post<TripOut>(`/dispatch/trips/${tripId}/${path}`, body ?? null)
+        .then((r) => r.data),
+    rejectCompletion: (tripId: string, reason: string) =>
+      apiClient
+        .post<TripOut>(`/dispatch/trips/${tripId}/reject-completion`, { reason })
+        .then((r) => r.data),
     sealTrip: (tripId: string) =>
       apiClient.post<TripOut>(`/dispatch/trips/${tripId}/seal`).then((r) => r.data),
     mergeTrips: (sourceId: string, targetId: string) =>
@@ -127,6 +142,13 @@ export const api = {
   notifications: {
     list: () =>
       apiClient.get<NotificationOut[]>("/notifications").then((r) => r.data),
+  },
+  admin: {
+    /** Admin-only. A dispatcher's token gets a 403 here by design. */
+    revenueSummary: (days = 30) =>
+      apiClient
+        .get<RevenueSummary>("/admin/revenue-summary", { params: { days } })
+        .then((r) => r.data),
   },
   payments: {
     collect: (bookingId: string, payload: PaymentCollect) =>

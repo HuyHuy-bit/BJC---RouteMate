@@ -12,6 +12,7 @@ from app.models.trip import Trip
 from app.models.user import User
 from app.models.vehicle import Vehicle
 from app.schemas.user import UserOut, UserUpdate
+from app.services.trip_state import VEHICLE_COMMITTED_STATUSES
 
 router = APIRouter(tags=["users"])
 
@@ -19,12 +20,9 @@ router = APIRouter(tags=["users"])
 # trip recently enough that the record is still operationally relevant —
 # 3 days chosen by the business as the cutoff.
 DELETE_LOOKBACK_DAYS = 3
-ACTIVE_TRIP_STATUSES = [
-    TripStatus.sealed,
-    TripStatus.assigned,
-    TripStatus.in_progress,
-    TripStatus.reassigning,
-]
+# Sourced from trip_state so a newly added state can't quietly fall out
+# of this guard — see the note on vehicles.BLOCKING_TRIP_STATUSES.
+ACTIVE_TRIP_STATUSES = list(VEHICLE_COMMITTED_STATUSES)
 
 
 @router.get("", response_model=list[UserOut])
@@ -153,6 +151,14 @@ def delete_user(
         {"default_driver_id": None}
     )
     db.query(Trip).filter(Trip.driver_id == user.id).update({"driver_id": None})
+    # Who finalized a trip is a second, independent reference to this
+    # table — a dispatcher who never drove anything still appears here.
+    # The column is ON DELETE SET NULL at the database level too, but
+    # clearing it explicitly keeps every users FK handled the same way
+    # in one readable place.
+    db.query(Trip).filter(Trip.finalized_by_user_id == user.id).update(
+        {"finalized_by_user_id": None}
+    )
     # payments.collected_by_user_id is a real foreign key, so an older
     # collection record would otherwise block the delete outright with a
     # 500. Cleared like trips.driver_id above; the payment itself and its

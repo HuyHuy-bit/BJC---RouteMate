@@ -16,7 +16,6 @@ import QueryState from "../components/ui/QueryState";
 import Skeleton from "../components/ui/Skeleton";
 import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
-import { fmtVnd } from "../lib/format";
 import { getErrorMessage } from "../lib/errors";
 
 // Fixed rather than dispatcher-adjustable — 15km covers this business's
@@ -79,10 +78,12 @@ export default function DispatchBoard() {
       // running. Two different numbers under the same word, 200px
       // apart, is how an operator learns to distrust a dashboard.
       running: trips.filter((t) => t.status === "in_progress").length,
-      revenue: trips.reduce(
-        (sum, t) => sum + t.bookings.reduce((s, b) => s + b.price_vnd, 0),
-        0
-      ),
+      // Trips a driver has reported finished and nobody has approved
+      // yet. This is the dispatcher's actual queue of work under the
+      // new workflow, and it replaces the revenue tile that used to
+      // sit here — money rollups are admin-only now (requirements §3).
+      awaitingReview: trips.filter((t) => t.status === "completion_requested")
+        .length,
     };
   }, [bookings, trips]);
 
@@ -168,16 +169,19 @@ export default function DispatchBoard() {
         />
         <Stat label="Xe đang chạy" value={statsReady ? stats.running : "—"} />
         <Stat
-          label="Doanh thu dự kiến"
-          value={statsReady ? fmtVnd(stats.revenue) : "—"}
+          label="Chờ duyệt hoàn thành"
+          value={statsReady ? stats.awaitingReview : "—"}
+          tone={statsReady && stats.awaitingReview > 0 ? "warning" : undefined}
         />
       </Card>
 
       <AttentionPanel />
 
-      {/* Where every active car is right now — the operational
-          "at Bắc Giang / at Hà Nội / running" picture, above the
-          per-pool detail below. */}
+      {/* Where every car in the fleet is right now — including the idle
+          ones. This reads the vehicle roster and joins live trips onto
+          it, rather than being built from trips alone, which is why a
+          car used to vanish from the board the moment its trip
+          finished. */}
       <div className="mb-6">
         <QueryState
           query={tripsQuery}

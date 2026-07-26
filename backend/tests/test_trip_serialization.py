@@ -68,6 +68,13 @@ class FakeTrip:
     created_at: datetime = datetime(2026, 7, 25, tzinfo=timezone.utc)
     completed_at: datetime | None = None
     cancelled_at: datetime | None = None
+    # The driver/dispatcher handover trail. These tests pass an actor of
+    # None, so `available_actions` comes back empty and isn't exercised
+    # here — the transition rules have their own tests.
+    driver_accepted_at: datetime | None = None
+    completion_requested_at: datetime | None = None
+    finalized_at: datetime | None = None
+    finalized_by_user_id: UUID | None = None
 
 
 class _Point:

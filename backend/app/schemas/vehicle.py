@@ -43,6 +43,14 @@ class VehicleOut(BaseModel):
     home_corridor_id: uuid.UUID | None
     last_location_at: datetime | None
 
+    # Where the car actually is. Previously only the TIMESTAMP of the
+    # last fix was exposed, never the position — so the fleet view had
+    # no way to say "this car is in Hà Nội now" and instead inferred
+    # location from live trips, which is why a car vanished from the
+    # board the moment its trip finished. Requirements §1.
+    last_location_lat: float | None = None
+    last_location_lng: float | None = None
+
     model_config = {"from_attributes": True}
 
 

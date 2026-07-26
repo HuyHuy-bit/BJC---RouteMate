@@ -5,10 +5,9 @@ import { api } from "../lib/api";
 import type { TripOut, TripStatus } from "../types";
 import {
   DIRECTION,
-  NEXT_TRIP_ACTION,
   TRIP_STATUS,
-  fmtVnd,
   seatsTaken,
+  tripActionFor,
   tripIdentity,
 } from "../lib/format";
 import Badge from "./ui/Badge";
@@ -36,6 +35,11 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
     trip: TripOut;
     driverId: string;
   } | null>(null);
+  // Sending a completion claim back puts a trip the driver believed was
+  // finished back on their plate, so it asks for a reason first rather
+  // than firing on a single tap.
+  const [pendingBounce, setPendingBounce] = useState<TripOut | null>(null);
+  const [bounceReason, setBounceReason] = useState("");
 
   const driversQuery = useQuery({
     queryKey: ["drivers"],
@@ -65,13 +69,31 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
     }
   };
 
-  const handleAdvance = async (trip: TripOut, next: TripStatus, label: string) => {
+  const handleAction = async (trip: TripOut, path: string, label: string) => {
+    setBusy(`${path}:${trip.id}`);
     try {
-      await api.dispatch.updateStatus(trip.id, next);
+      await api.dispatch.action(trip.id, path);
       toast(`${label} — đã cập nhật.`, "success");
       refresh();
     } catch (err: any) {
       toast(getErrorMessage(err, "Không cập nhật được chuyến."), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  const handleBounce = async (trip: TripOut, reason: string) => {
+    setBusy(`reject-completion:${trip.id}`);
+    try {
+      await api.dispatch.rejectCompletion(trip.id, reason);
+      toast("Đã trả chuyến lại cho tài xế.", "success");
+      setPendingBounce(null);
+      refresh();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không trả lại được chuyến."), "error");
+      setPendingBounce(null);
+    } finally {
+      setBusy(null);
     }
   };
 
@@ -114,8 +136,13 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
     <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
       {trips.map((trip) => {
         const status = TRIP_STATUS[trip.status];
-        const action = NEXT_TRIP_ACTION[trip.status];
-        const revenue = trip.bookings.reduce((s, b) => s + b.price_vnd, 0);
+        // Per-trip revenue is gone from this panel: it is a money
+        // rollup, and dispatchers no longer see those (requirements
+        // §3). Individual fares still show on the booking rows, which
+        // is what a dispatcher actually needs to quote a customer.
+        const actions = (trip.available_actions ?? [])
+          .map((to) => tripActionFor(trip.status, to))
+          .filter((a): a is NonNullable<typeof a> => a !== undefined);
         const direction = trip.bookings[0]?.direction;
         const isForming = trip.status === "forming";
 
@@ -249,23 +276,26 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
                 </>
               )}
 
-              {action && (
+              {/* Actions come from the backend's available_actions, so
+                  a dispatcher is never offered Start or Complete — those
+                  transitions are driver-only and the server refuses
+                  them. This panel used to render them unconditionally. */}
+              {actions.map((a) => (
                 <Button
-                  variant="secondary"
+                  key={a.path}
+                  variant={a.tone === "danger" ? "ghost" : "secondary"}
                   size="sm"
                   fullWidth
-                  onClick={() => handleAdvance(trip, action.next, action.label)}
+                  loading={busy === `${a.path}:${trip.id}`}
+                  onClick={() =>
+                    a.path === "reject-completion"
+                      ? setPendingBounce(trip)
+                      : handleAction(trip, a.path, a.label)
+                  }
                 >
-                  {action.label}
+                  {a.label}
                 </Button>
-              )}
-
-              <div className="flex items-center justify-between pt-1">
-                <span className="text-2xs text-faint">
-                  Doanh thu
-                </span>
-                <span className="text-base font-semibold tnum">{fmtVnd(revenue)}</span>
-              </div>
+              ))}
             </div>
           </Card>
         );
@@ -306,6 +336,33 @@ export default function TripsPanel({ trips }: { trips: TripOut[] }) {
         }
         onCancel={() => setPendingReassign(null)}
       />
+
+      <ConfirmDialog
+        open={pendingBounce !== null}
+        title="Trả chuyến lại cho tài xế?"
+        description="Tài xế đã báo hoàn thành chuyến này. Trả lại sẽ đưa chuyến về trạng thái đang chạy — xe vẫn tính là đang bận và vị trí xe chưa được cập nhật."
+        confirmLabel="Trả lại tài xế"
+        loading={busy?.startsWith("reject-completion:") ?? false}
+        confirmDisabled={bounceReason.trim().length === 0}
+        onConfirm={() =>
+          pendingBounce && handleBounce(pendingBounce, bounceReason.trim())
+        }
+        onCancel={() => {
+          setPendingBounce(null);
+          setBounceReason("");
+        }}
+      >
+        <label className="block">
+          <span className="text-2xs text-faint">Lý do (tài xế sẽ thấy)</span>
+          <input
+            type="text"
+            value={bounceReason}
+            onChange={(e) => setBounceReason(e.target.value)}
+            placeholder="VD: chưa trả khách cuối"
+            className="mt-1 w-full h-touch px-3 text-base rounded border border-line-strong bg-surface focus:border-line-focus transition-colors"
+          />
+        </label>
+      </ConfirmDialog>
     </div>
   );
 }

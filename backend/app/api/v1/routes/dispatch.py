@@ -9,7 +9,9 @@ from sqlalchemy.orm import Session, joinedload
 from app.api.deps import get_current_user, require_role
 from app.db.session import get_db
 from app.models.booking import Booking
+from app.models.corridor import Corridor
 from app.models.enums import (
+    BookingDirection,
     BookingStatus,
     DispatchEventType,
     TripStatus,
@@ -26,6 +28,8 @@ from app.schemas.trip import (
     TripAssignDriver,
     TripExtendWait,
     TripOut,
+    TripRejectAssignment,
+    TripRejectCompletion,
     TripReportIssue,
     TripStatusUpdate,
 )
@@ -45,28 +49,37 @@ from app.services.dispatch_service import (
     upgrade_to_private,
 )
 from app.services.notification_service import notify_driver_assigned
+from app.services.trip_state import (
+    DRIVER_ACTIVE_STATUSES,
+    TransitionError,
+    TransitionForbidden,
+    allowed_transitions,
+    apply_transition,
+    check_transition,
+)
 
 router = APIRouter(tags=["dispatch"])
 
-# Only these forward transitions are allowed — no skipping steps, no going
-# backwards. Any role-appropriate caller can cancel from most states.
-ALLOWED_TRANSITIONS: dict[TripStatus, set[TripStatus]] = {
-    TripStatus.forming: {TripStatus.sealed, TripStatus.cancelled},
-    TripStatus.sealed: {TripStatus.assigned, TripStatus.cancelled},
-    TripStatus.assigned: {
-        TripStatus.in_progress,
-        TripStatus.reassigning,
-        TripStatus.cancelled,
-    },
-    TripStatus.in_progress: {
-        TripStatus.completed,
-        TripStatus.reassigning,
-        TripStatus.cancelled,
-    },
-    TripStatus.reassigning: {TripStatus.assigned, TripStatus.cancelled},
-    TripStatus.completed: set(),
-    TripStatus.cancelled: set(),
-}
+# The transition table used to live here, and described a workflow the
+# service layer didn't follow — it claimed `forming -> sealed ->
+# assigned` while seal_trip jumped straight to `assigned`, and it was
+# consulted by exactly one of the eight places that wrote trip.status.
+# It now lives in app/services/trip_state.py, which every status write
+# goes through. See docs/STATE_MACHINE.md.
+
+
+def _http_error(exc: TransitionError) -> HTTPException:
+    """Translate the service layer's refusal into the right status code.
+    The service layer stays free of FastAPI so it can be unit-tested
+    without one."""
+    return HTTPException(
+        status_code=(
+            status.HTTP_403_FORBIDDEN
+            if isinstance(exc, TransitionForbidden)
+            else status.HTTP_400_BAD_REQUEST
+        ),
+        detail=str(exc),
+    )
 
 
 # A trip that's over is a historical record — it should still show who
@@ -75,8 +88,19 @@ ALLOWED_TRANSITIONS: dict[TripStatus, set[TripStatus]] = {
 # cancelled is simply not on it any more.
 FINISHED_TRIP_STATUSES = (TripStatus.completed, TripStatus.cancelled)
 
+# A driver can be put on a trip only while it is still waiting to depart
+# or looking for a replacement car. Not once it is rolling, and
+# certainly not once it is over.
+DRIVER_ASSIGNABLE_STATUSES = (
+    TripStatus.forming,
+    TripStatus.sealed,
+    TripStatus.assigned,
+    TripStatus.driver_accepted,
+    TripStatus.reassigning,
+)
 
-def _to_trip_out(trip: Trip) -> TripOut:
+
+def _to_trip_out(trip: Trip, actor: User | None = None) -> TripOut:
     """
     Serialize a trip for the API.
 
@@ -85,6 +109,10 @@ def _to_trip_out(trip: Trip) -> TripOut:
     cancelled (so the car would drive to a pickup nobody was waiting
     at), and every UI that sums over trip.bookings — seat occupancy,
     expected revenue — counted them too.
+
+    `actor` decides what goes in `available_actions`: the same
+    transition table the write path enforces, so a client never renders
+    a button the server would reject.
     """
     if trip.status in FINISHED_TRIP_STATUSES:
         relevant = list(trip.bookings)
@@ -106,6 +134,15 @@ def _to_trip_out(trip: Trip) -> TripOut:
         created_at=trip.created_at,
         completed_at=trip.completed_at,
         cancelled_at=trip.cancelled_at,
+        driver_accepted_at=trip.driver_accepted_at,
+        completion_requested_at=trip.completion_requested_at,
+        finalized_at=trip.finalized_at,
+        finalized_by_user_id=trip.finalized_by_user_id,
+        available_actions=(
+            sorted(allowed_transitions(trip.status, actor), key=lambda s: s.value)
+            if actor is not None
+            else []
+        ),
     )
 
 
@@ -139,7 +176,11 @@ def run_dispatch(
     full_trips = (
         db.query(Trip)
         .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
-        .filter(Trip.status.in_([TripStatus.assigned, TripStatus.sealed]))
+        .filter(
+            Trip.status.in_(
+                [TripStatus.sealed, TripStatus.assigned, TripStatus.driver_accepted]
+            )
+        )
         .order_by(Trip.created_at.desc())
         .all()
     )
@@ -154,7 +195,7 @@ def run_dispatch(
             )
     db.commit()
 
-    trips_out = [_to_trip_out(t) for t in full_trips]
+    trips_out = [_to_trip_out(t, current_user) for t in full_trips]
     return MatchingRunResult(trips_created=summary["sealed"], trips=trips_out)
 
 
@@ -173,7 +214,7 @@ def list_trips(
         .order_by(Trip.created_at.desc())
         .all()
     )
-    return [_to_trip_out(t) for t in trips]
+    return [_to_trip_out(t, current_user) for t in trips]
 
 
 @router.get("/my-trips", response_model=list[TripOut])
@@ -185,12 +226,12 @@ def my_trips(
         db.query(Trip)
         .options(joinedload(Trip.bookings).joinedload(Booking.customer), joinedload(Trip.bookings).joinedload(Booking.payment))
         .filter(Trip.driver_id == current_user.id)
-        .filter(Trip.status.in_([TripStatus.assigned, TripStatus.in_progress]))
+        .filter(Trip.status.in_(DRIVER_ACTIVE_STATUSES))
         .filter(Trip.bookings.any())
         .order_by(Trip.created_at.asc())
         .all()
     )
-    return [_to_trip_out(t) for t in trips]
+    return [_to_trip_out(t, current_user) for t in trips]
 
 
 @router.get("/history", response_model=list[TripOut])
@@ -226,7 +267,7 @@ def trip_history(
                 target_id=booking.customer_id,
             )
     db.commit()
-    return [_to_trip_out(t) for t in trips]
+    return [_to_trip_out(t, current_user) for t in trips]
 
 
 @router.get("/my-history", response_model=list[TripOut])
@@ -248,7 +289,7 @@ def my_trip_history(
         .limit(min(limit, 300))
         .all()
     )
-    return [_to_trip_out(t) for t in trips]
+    return [_to_trip_out(t, current_user) for t in trips]
 
 
 @router.get("/attention", response_model=list[AttentionItem])
@@ -270,11 +311,6 @@ def list_attention_items(
         .filter(Trip.bookings.any())
         .all()
     )
-    any_vehicle_available = (
-        db.query(Vehicle).filter(Vehicle.status == VehicleStatus.available).first()
-        is not None
-    )
-
     items: list[AttentionItem] = []
     for trip in trips:
         active = [
@@ -304,23 +340,46 @@ def list_attention_items(
                     bookings=[to_booking_out(b) for b in active],
                 )
             )
-        elif (
-            decision.decision is SealDecision.SEAL
-            and trip.vehicle_id is None
-            and not any_vehicle_available
-        ):
-            items.append(
-                AttentionItem(
-                    kind="no_vehicle",
-                    trip_id=trip.id,
-                    direction=trip.direction.value,
-                    passenger_count=len(active),
-                    minutes_overdue=overdue,
-                    reason="Sẵn sàng chạy nhưng đội xe đã kín",
-                    options=None,
-                    bookings=[to_booking_out(b) for b in active],
-                )
+
+    # Pools that already decided to depart and are waiting on a car.
+    # This used to be inferred by re-running evaluate_pool over every
+    # forming pool and cross-checking the fleet on each request; it is
+    # now simply a stored status, which is the whole reason `sealed`
+    # was made reachable.
+    awaiting_vehicle = (
+        db.query(Trip)
+        .options(
+            joinedload(Trip.bookings).joinedload(Booking.customer),
+            joinedload(Trip.bookings).joinedload(Booking.payment),
+        )
+        .filter(Trip.status == TripStatus.sealed)
+        .filter(Trip.vehicle_id.is_(None))
+        .filter(Trip.bookings.any())
+        .all()
+    )
+    for trip in awaiting_vehicle:
+        active = [
+            b for b in trip.bookings if b.status.value not in ("cancelled", "no_show")
+        ]
+        if not active:
+            continue
+        overdue = (
+            max(0.0, (now - trip.departure_deadline).total_seconds() / 60)
+            if trip.departure_deadline
+            else 0.0
+        )
+        items.append(
+            AttentionItem(
+                kind="no_vehicle",
+                trip_id=trip.id,
+                direction=trip.direction.value,
+                passenger_count=len(active),
+                minutes_overdue=overdue,
+                reason="Sẵn sàng chạy nhưng đội xe đã kín",
+                options=None,
+                bookings=[to_booking_out(b) for b in active],
             )
+        )
 
     # Trips a driver reported disrupted (see report_trip_disrupted) that
     # couldn't find a replacement vehicle right away — the automatic
@@ -387,7 +446,7 @@ def extend_wait(
     )
     db.commit()
     db.refresh(trip)
-    return _to_trip_out(trip)
+    return _to_trip_out(trip, current_user)
 
 
 @router.post("/trips/{trip_id}/upgrade-private", response_model=TripOut)
@@ -424,7 +483,7 @@ def upgrade_private(
 
     db.commit()
     db.refresh(trip)
-    return _to_trip_out(trip)
+    return _to_trip_out(trip, current_user)
 
 
 @router.post("/trips/{trip_id}/seal", response_model=TripOut)
@@ -470,7 +529,7 @@ def forceseal_trip(
     )
     db.commit()
     db.refresh(trip)
-    return _to_trip_out(trip)
+    return _to_trip_out(trip, current_user)
 
 
 @router.post("/trips/{source_id}/merge/{target_id}", response_model=MergeTripsResult)
@@ -520,7 +579,7 @@ def forcemerge_trips(
     )
     db.commit()
     db.refresh(target)
-    return MergeTripsResult(target=_to_trip_out(target))
+    return MergeTripsResult(target=_to_trip_out(target, current_user))
 
 
 @router.patch("/trips/{trip_id}/driver", response_model=TripOut)
@@ -539,13 +598,42 @@ def assign_driver(
             detail="driver_id must belong to a user with role=driver",
         )
 
+    # This endpoint previously had no status check at all — a driver
+    # could be assigned to a trip that had already finished, been
+    # cancelled, or was halfway down the road with someone else driving.
+    if trip.status not in DRIVER_ASSIGNABLE_STATUSES:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                f"Trip is {trip.status.value} — a driver can only be assigned "
+                "before the trip departs"
+            ),
+        )
+
+    # Swapping the driver on a trip the previous driver had already
+    # accepted invalidates that acceptance: the new driver has agreed to
+    # nothing yet. Drop back to `assigned` so they get the same
+    # accept/reject choice anyone else would.
+    if trip.status is TripStatus.driver_accepted and trip.driver_id != driver.id:
+        try:
+            apply_transition(
+                db,
+                trip,
+                TripStatus.assigned,
+                actor=current_user,
+                reason="reassigned to a different driver",
+            )
+        except TransitionError as exc:
+            raise _http_error(exc)
+        trip.driver_accepted_at = None
+
     trip.driver_id = driver.id
     # Riders were told a vehicle was coming when the trip sealed; now
     # tell them who's actually driving.
     notify_driver_assigned(db, trip, driver.full_name)
     db.commit()
     db.refresh(trip)
-    return _to_trip_out(trip)
+    return _to_trip_out(trip, current_user)
 
 
 @router.patch("/trips/{trip_id}/status", response_model=TripOut)
@@ -555,69 +643,285 @@ def update_trip_status(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
+    """
+    Generic transition endpoint.
+
+    Both the permission check and the legality check now come from
+    `apply_transition` — this used to allow ANY staff member ANY
+    transition, which is how a dispatcher could start and complete a
+    trip they had never been in. The named endpoints below (accept,
+    start, request-completion, finalize) are thin wrappers over this
+    same call, so the two paths cannot enforce different rules.
+    """
     trip = _load_trip(db, trip_id)
 
-    is_staff = current_user.role in (UserRole.admin, UserRole.dispatcher)
-    is_assigned_driver = (
-        current_user.role == UserRole.driver and trip.driver_id == current_user.id
-    )
-    if not (is_staff or is_assigned_driver):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only staff or this trip's assigned driver can update its status",
+    try:
+        apply_transition(
+            db, trip, payload.status, actor=current_user, reason="status update"
         )
+    except TransitionError as exc:
+        raise _http_error(exc)
 
-    if payload.status not in ALLOWED_TRANSITIONS.get(trip.status, set()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot move trip from {trip.status.value} to {payload.status.value}",
-        )
-
-    trip.status = payload.status
-
-    if payload.status == TripStatus.completed:
-        trip.completed_at = datetime.now(timezone.utc)
-        # Previously only the TRIP's status flipped to completed — every
-        # booking inside it stayed stuck at locked/onboard forever, which
-        # is what made a real ride-history view impossible: nothing was
-        # ever actually marked as a finished ride from the customer's
-        # side. Cascade it here, once, rather than requiring a separate
-        # per-passenger dropoff-confirmation flow that doesn't exist yet.
-        for b in trip.bookings:
-            if b.status.value not in ("cancelled", "no_show"):
-                b.status = BookingStatus.completed
-
-        # Cheapest real signal of where this vehicle actually is: wherever
-        # it just dropped its last passenger. last_location used to be
-        # written nowhere at all, which meant the next vehicle assignment
-        # had zero location data to work with — see
-        # dispatch_service.py:_assign_vehicle.
-        if trip.vehicle_id is not None:
-            active = [
-                b for b in trip.bookings if b.status.value not in ("cancelled", "no_show")
-            ]
-            if active:
-                last_stop = max(active, key=lambda b: (b.stop_order or 0))
-                dropoff = to_shape(last_stop.dropoff_point)
-                vehicle = db.get(Vehicle, trip.vehicle_id)
-                if vehicle is not None:
-                    vehicle.last_location = WKTElement(
-                        f"POINT({dropoff.x} {dropoff.y})", srid=4326
-                    )
-                    vehicle.last_location_at = datetime.now(timezone.utc)
-
-    elif payload.status == TripStatus.cancelled:
-        trip.cancelled_at = datetime.now(timezone.utc)
-        for b in trip.bookings:
-            if b.status.value not in ("cancelled", "no_show", "completed"):
-                b.status = BookingStatus.cancelled
-
-    if payload.status in (TripStatus.completed, TripStatus.cancelled):
-        release_vehicle_if_free(db, trip)
+    _apply_side_effects(db, trip, payload.status, current_user)
 
     db.commit()
     db.refresh(trip)
-    return _to_trip_out(trip)
+    return _to_trip_out(trip, current_user)
+
+
+def _apply_side_effects(
+    db: Session, trip: Trip, new_status: TripStatus, actor: User
+) -> None:
+    """
+    What has to happen to the world outside the trip row once it moves.
+
+    Booking cascades and timestamps belong to the transition itself and
+    live in trip_state; this is the part that touches vehicles.
+    """
+    if new_status is TripStatus.in_progress:
+        # The car is now genuinely out with passengers, not just
+        # earmarked at the hub.
+        if trip.vehicle_id is not None:
+            vehicle = db.get(Vehicle, trip.vehicle_id)
+            if vehicle is not None and vehicle.status is VehicleStatus.assigned:
+                vehicle.status = VehicleStatus.on_trip
+
+    elif new_status is TripStatus.completed:
+        _capture_final_location(db, trip)
+        release_vehicle_if_free(db, trip)
+
+    elif new_status is TripStatus.cancelled:
+        release_vehicle_if_free(db, trip)
+
+
+def _capture_final_location(db: Session, trip: Trip) -> None:
+    """
+    Where the car ended up — written at FINALIZATION, not when the
+    driver says they're done. A completion is a claim until a dispatcher
+    confirms it, and the fleet's picture of where its cars are should be
+    built from confirmed facts.
+
+    Falls back to the corridor's destination hub when every booking
+    ended cancelled/no-show. The old code skipped the write entirely in
+    that case, leaving the car pinned to wherever it started while it
+    was in fact sitting at the other end of the corridor — and
+    _assign_vehicle would then keep choosing it for trips near a place
+    it had already driven away from.
+    """
+    if trip.vehicle_id is None:
+        return
+    vehicle = db.get(Vehicle, trip.vehicle_id)
+    if vehicle is None:
+        return
+
+    active = [
+        b for b in trip.bookings if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+    ]
+    if active:
+        last_stop = max(active, key=lambda b: (b.stop_order or 0))
+        point = to_shape(last_stop.dropoff_point)
+        lng, lat = point.x, point.y
+    else:
+        corridor = db.get(Corridor, trip.corridor_id)
+        if corridor is None:
+            return
+        # Outbound ends at the away hub; a return leg ends back at base.
+        if trip.direction is BookingDirection.return_leg:
+            lat, lng = corridor.home_hub_lat, corridor.home_hub_lng
+        else:
+            lat, lng = corridor.away_hub_lat, corridor.away_hub_lng
+
+    vehicle.last_location = WKTElement(f"POINT({lng} {lat})", srid=4326)
+    vehicle.last_location_at = datetime.now(timezone.utc)
+
+
+def _advance(
+    db: Session,
+    trip: Trip,
+    to_status: TripStatus,
+    actor: User,
+    event: DispatchEventType,
+    reason: str,
+) -> TripOut:
+    """
+    Shared body for every named workflow action below.
+
+    Each one is the same three steps — move the trip, apply the
+    vehicle-side effects, write the audit event — differing only in
+    which transition and which event type. Writing them out six times
+    is how the old code ended up with a completion path that cascaded
+    booking statuses and a cancellation path that forgot to.
+    """
+    try:
+        apply_transition(db, trip, to_status, actor=actor, reason=reason)
+    except TransitionError as exc:
+        raise _http_error(exc)
+
+    _apply_side_effects(db, trip, to_status, actor)
+    log_event(db, event, trip_id=trip.id, actor_user_id=actor.id, reason=reason)
+
+    db.commit()
+    db.refresh(trip)
+    return _to_trip_out(trip, actor)
+
+
+# --- The driver's half of the workflow --------------------------------
+#
+# None of these carry a `require_role` dependency. The role check lives
+# in the transition table, which is also what the write path enforces —
+# adding a second check here would be a second source of truth, and the
+# two would eventually disagree. A dispatcher calling /start gets a 403
+# from apply_transition, not from a decorator.
+
+
+@router.post("/trips/{trip_id}/accept", response_model=TripOut)
+def accept_trip(
+    trip_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Driver acknowledges an assignment. Only the assigned driver."""
+    trip = _load_trip(db, trip_id)
+    return _advance(
+        db,
+        trip,
+        TripStatus.driver_accepted,
+        current_user,
+        DispatchEventType.driver_accepted,
+        "driver accepted the assignment",
+    )
+
+
+@router.post("/trips/{trip_id}/start", response_model=TripOut)
+def start_trip(
+    trip_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Driver presses Start Trip. Dispatchers and admins are refused —
+    this endpoint and the board button that used to call it were the
+    concrete way the role boundary was being violated.
+    """
+    trip = _load_trip(db, trip_id)
+    return _advance(
+        db,
+        trip,
+        TripStatus.in_progress,
+        current_user,
+        DispatchEventType.trip_started,
+        "driver started the trip",
+    )
+
+
+@router.post("/trips/{trip_id}/request-completion", response_model=TripOut)
+def request_completion(
+    trip_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Driver presses Complete Trip. This does NOT complete the trip — it
+    raises a finalization request for a dispatcher to review. The
+    vehicle stays `on_trip` and its location is not updated until
+    someone signs off.
+    """
+    trip = _load_trip(db, trip_id)
+    return _advance(
+        db,
+        trip,
+        TripStatus.completion_requested,
+        current_user,
+        DispatchEventType.completion_requested,
+        "driver reported the trip finished",
+    )
+
+
+@router.post("/trips/{trip_id}/reject", response_model=TripOut)
+def reject_assignment(
+    trip_id: uuid.UUID,
+    payload: TripRejectAssignment,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Driver declines a trip, or stands down from one they had accepted.
+
+    Deliberately the same machinery as a breakdown report: the
+    passengers, route and ETAs all survive, and the system starts
+    hunting for a replacement car immediately rather than dropping the
+    trip on a dispatcher's desk.
+    """
+    trip = _load_trip(db, trip_id)
+
+    try:
+        check_transition(trip, TripStatus.reassigning, current_user)
+    except TransitionError as exc:
+        raise _http_error(exc)
+
+    report_trip_disrupted(
+        db,
+        trip,
+        reason=payload.reason,
+        notes=payload.notes,
+        actor=current_user,
+    )
+    db.commit()
+    db.refresh(trip)
+    return _to_trip_out(trip, current_user)
+
+
+# --- The dispatcher's ruling ------------------------------------------
+
+
+@router.post("/trips/{trip_id}/finalize", response_model=TripOut)
+def finalize_trip(
+    trip_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Dispatcher confirms the driver's completion claim. This is the only
+    way a trip reaches `completed`.
+
+    Finalizing is what updates the vehicle's location to where it
+    actually finished and returns it to the available pool — see
+    _capture_final_location. A car that finishes in Hà Nội at 08:29 is
+    an available Hà Nội car from 08:29.
+    """
+    trip = _load_trip(db, trip_id)
+    return _advance(
+        db,
+        trip,
+        TripStatus.completed,
+        current_user,
+        DispatchEventType.trip_finalized,
+        "dispatcher finalized the trip",
+    )
+
+
+@router.post("/trips/{trip_id}/reject-completion", response_model=TripOut)
+def reject_completion(
+    trip_id: uuid.UUID,
+    payload: TripRejectCompletion,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    Dispatcher sends a completion claim back: the trip isn't actually
+    finished. It returns to `in_progress` with its passengers still
+    aboard, the vehicle still `on_trip`, and no location captured —
+    nothing about the claim is treated as fact.
+    """
+    trip = _load_trip(db, trip_id)
+    return _advance(
+        db,
+        trip,
+        TripStatus.in_progress,
+        current_user,
+        DispatchEventType.completion_rejected,
+        payload.reason,
+    )
 
 
 @router.post("/trips/{trip_id}/report-issue", response_model=TripOut)
@@ -637,29 +941,22 @@ def report_issue(
     """
     trip = _load_trip(db, trip_id)
 
-    is_staff = current_user.role in (UserRole.admin, UserRole.dispatcher)
-    is_assigned_driver = (
-        current_user.role == UserRole.driver and trip.driver_id == current_user.id
-    )
-    if not (is_staff or is_assigned_driver):
-        raise HTTPException(
-            status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only staff or this trip's assigned driver can report an issue",
-        )
-
-    if TripStatus.reassigning not in ALLOWED_TRANSITIONS.get(trip.status, set()):
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Cannot report an issue on a trip that is {trip.status.value}",
-        )
+    # Who may do this, and from which states, both come from the
+    # transition table — including the rule that a driver may only touch
+    # their own trip. The hand-rolled `is_staff or is_assigned_driver`
+    # check that used to sit here was a second copy of that rule.
+    try:
+        check_transition(trip, TripStatus.reassigning, current_user)
+    except TransitionError as exc:
+        raise _http_error(exc)
 
     report_trip_disrupted(
         db,
         trip,
         reason=payload.reason,
         notes=payload.notes,
-        actor_user_id=current_user.id,
+        actor=current_user,
     )
     db.commit()
     db.refresh(trip)
-    return _to_trip_out(trip)
+    return _to_trip_out(trip, current_user)

@@ -99,4 +99,27 @@ class Trip(Base, TimestampMixin):
         DateTime(timezone=True), nullable=True
     )
 
+    # --- Driver/dispatcher handover trail ---
+    # Each step of the workflow that a human attests to gets its own
+    # timestamp rather than being inferred from `updated_at`. A disputed
+    # trip needs to show when the driver took it, when they said they
+    # were done, and when a dispatcher agreed — three different people's
+    # claims at three different times.
+    driver_accepted_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    completion_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    finalized_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Who signed off. Deliberately SET NULL rather than blocking the
+    # delete: users.py already clears trips.driver_id when a staff
+    # account is removed, and a finalization record that blocks account
+    # deletion forever would be worse than one that loses the name.
+    finalized_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+
     bookings: Mapped[list["Booking"]] = relationship(back_populates="trip")

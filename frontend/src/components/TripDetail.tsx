@@ -7,6 +7,7 @@ import {
   Users,
 } from "lucide-react";
 import type { TripOut, UserOut, VehicleOut } from "../types";
+import { useAuth } from "../context/AuthContext";
 import {
   DIRECTION,
   PAYMENT_STATUS,
@@ -68,6 +69,11 @@ export default function TripDetail({
     rosterDriver ??
     (selfDriver && selfDriver.id === trip.driver_id ? selfDriver : undefined);
   const vehicle = vehicles.find((v) => v.id === trip.vehicle_id);
+  // Trip-level revenue is a money rollup, so it is admin-only
+  // (requirements §3). Each passenger's own fare still shows on their
+  // row below — a dispatcher needs that to talk to a customer; they
+  // don't need the trip's takings.
+  const { user } = useAuth();
   const revenue = trip.bookings.reduce((s, b) => s + b.price_vnd, 0);
   const finishedAt = trip.completed_at ?? trip.cancelled_at;
 
@@ -95,9 +101,11 @@ export default function TripDetail({
                 : `${trip.bookings.length} khách · ${seatsTaken(trip.bookings)} chỗ`}
             </span>
           </Fact>
-          <Fact label="Doanh thu">
-            <span className="tnum font-semibold">{fmtVnd(revenue)}</span>
-          </Fact>
+          {user?.role === "admin" && (
+            <Fact label="Doanh thu">
+              <span className="tnum font-semibold">{fmtVnd(revenue)}</span>
+            </Fact>
+          )}
         </dl>
       </section>
 

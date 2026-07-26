@@ -104,16 +104,19 @@ export const VEHICLE_STATUS: Record<
   { label: string; tone: Tone }
 > = {
   available: { label: "Sẵn sàng", tone: "success" },
+  assigned: { label: "Đã phân chuyến", tone: "info" },
   on_trip: { label: "Đang chạy", tone: "info" },
   maintenance: { label: "Bảo dưỡng", tone: "warning" },
-  inactive: { label: "Ngừng hoạt động", tone: "neutral" },
+  offline: { label: "Ngừng hoạt động", tone: "neutral" },
 };
 
 export const TRIP_STATUS: Record<TripStatus, { label: string; tone: Tone }> = {
   forming: { label: "Đang gom khách", tone: "neutral" },
   sealed: { label: "Đã chốt, chờ xe", tone: "warning" },
-  assigned: { label: "Sẵn sàng chạy", tone: "info" },
+  assigned: { label: "Chờ tài xế nhận", tone: "info" },
+  driver_accepted: { label: "Tài xế đã nhận", tone: "info" },
   in_progress: { label: "Đang chạy", tone: "warning" },
+  completion_requested: { label: "Chờ duyệt hoàn thành", tone: "warning" },
   completed: { label: "Hoàn thành", tone: "success" },
   cancelled: { label: "Đã huỷ", tone: "danger" },
   reassigning: { label: "Đang đổi xe", tone: "danger" },
@@ -141,13 +144,48 @@ export const DIRECTION: Record<BookingDirection, { label: string; short: string 
 };
 
 /** Next allowed forward transition, mirroring the backend state machine. */
-export const NEXT_TRIP_ACTION: Partial<
-  Record<TripStatus, { label: string; next: TripStatus }>
+/**
+ * What each workflow action is called, and which endpoint performs it.
+ *
+ * Keyed by the TARGET status rather than the current one, because the
+ * backend hands us `available_actions` as a list of reachable statuses
+ * — so a caller looks up what it was told it may do, instead of
+ * re-deriving it from the current status and hoping the two agree.
+ *
+ * This replaces a single NEXT_TRIP_ACTION map shared by every role,
+ * which is precisely why the dispatch board rendered "Bắt đầu chuyến"
+ * and "Hoàn thành chuyến" — driver-only actions — to dispatchers.
+ */
+export const TRIP_ACTION: Partial<
+  Record<TripStatus, { label: string; path: string; tone?: "primary" | "danger" }>
 > = {
-  sealed: { label: "Xác nhận xe", next: "assigned" },
-  assigned: { label: "Bắt đầu chuyến", next: "in_progress" },
-  in_progress: { label: "Hoàn thành chuyến", next: "completed" },
+  driver_accepted: { label: "Nhận chuyến", path: "accept", tone: "primary" },
+  in_progress: { label: "Bắt đầu chuyến", path: "start", tone: "primary" },
+  completion_requested: {
+    label: "Hoàn thành chuyến",
+    path: "request-completion",
+    tone: "primary",
+  },
+  completed: { label: "Duyệt hoàn thành", path: "finalize", tone: "primary" },
+  reassigning: { label: "Không nhận chuyến", path: "reject", tone: "danger" },
 };
+
+/**
+ * `completion_requested -> in_progress` is the dispatcher sending a
+ * completion claim back, but `in_progress` already maps to the
+ * driver's "Bắt đầu chuyến" above. The action depends on where you
+ * are, not only where you're going, so this one case is looked up by
+ * (from, to) instead.
+ */
+export function tripActionFor(
+  from: TripStatus,
+  to: TripStatus
+): { label: string; path: string; tone?: "primary" | "danger" } | undefined {
+  if (from === "completion_requested" && to === "in_progress") {
+    return { label: "Trả lại tài xế", path: "reject-completion", tone: "danger" };
+  }
+  return TRIP_ACTION[to];
+}
 
 /**
  * Where a car physically is right now, derived from its trip state.
@@ -163,7 +201,42 @@ export const NEXT_TRIP_ACTION: Partial<
  * `place` is the coarse bucket used for the summary counts; `label` is
  * what the operator reads.
  */
-export type FleetPlace = "bac_giang" | "ha_noi" | "running" | "issue";
+export type FleetPlace =
+  | "bac_giang"
+  | "ha_noi"
+  | "running"
+  | "issue"
+  | "off_duty";
+
+/** Rough hub coordinates, used only to bucket a parked car to one end
+ *  of the corridor for the fleet summary. Not a routing input. */
+const HUBS: { place: FleetPlace; lat: number; lng: number }[] = [
+  { place: "bac_giang", lat: 21.2731, lng: 106.1946 },
+  { place: "ha_noi", lat: 21.0278, lng: 105.8342 },
+];
+
+/**
+ * Which end of the corridor a car is parked at, from its last confirmed
+ * position. Nearest hub wins; there are only two, and they are ~50km
+ * apart, so plain squared distance is more than precise enough and
+ * avoids pulling in a geo library for a badge label.
+ */
+export function placeFromLatLng(
+  lat: number | null,
+  lng: number | null
+): FleetPlace | null {
+  if (lat == null || lng == null) return null;
+  let best: FleetPlace | null = null;
+  let bestD = Infinity;
+  for (const h of HUBS) {
+    const d = (h.lat - lat) ** 2 + (h.lng - lng) ** 2;
+    if (d < bestD) {
+      bestD = d;
+      best = h.place;
+    }
+  }
+  return best;
+}
 
 export function tripLocationState(
   status: TripStatus,
@@ -181,9 +254,15 @@ export function tripLocationState(
     case "sealed":
       return { place: origin, label: `Chờ xe tại ${originName}`, tone: "warning" };
     case "assigned":
+      return { place: origin, label: `Chờ tài xế nhận tại ${originName}`, tone: "info" };
+    case "driver_accepted":
       return { place: origin, label: `Sắp khởi hành từ ${originName}`, tone: "info" };
     case "in_progress":
       return { place: "running", label: `Đang chạy → ${destName}`, tone: "warning" };
+    // The car has physically arrived; only the paperwork is outstanding,
+    // so it belongs at the destination rather than still "running".
+    case "completion_requested":
+      return { place: destination, label: `Đã đến ${destName}, chờ duyệt`, tone: "warning" };
     case "completed":
       return { place: destination, label: `Đã đến ${destName}`, tone: "success" };
     case "reassigning":

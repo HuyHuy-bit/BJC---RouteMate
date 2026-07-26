@@ -23,12 +23,12 @@ import { useToast } from "../components/ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 import {
   DIRECTION,
-  NEXT_TRIP_ACTION,
   PAYMENT_STATUS,
   TRIP_STATUS,
   fmtDayLabel,
   fmtTime,
   fmtVnd,
+  tripActionFor,
 } from "../lib/format";
 
 const ISSUE_REASONS: { value: TripReportIssueReason; label: string }[] = [
@@ -127,9 +127,12 @@ function TripCard({
 }) {
   const [reportingIssue, setReportingIssue] = useState(false);
   const [submittingIssue, setSubmittingIssue] = useState(false);
+  const [busyPath, setBusyPath] = useState<string | null>(null);
 
   const status = TRIP_STATUS[trip.status];
-  const action = NEXT_TRIP_ACTION[trip.status];
+  const actions = (trip.available_actions ?? [])
+    .map((to) => tripActionFor(trip.status, to))
+    .filter((a): a is NonNullable<typeof a> => a !== undefined);
   const direction = trip.bookings[0]?.direction;
   const stops = orderedStops(trip.bookings);
   const canReportIssue = trip.status === "assigned" || trip.status === "in_progress";
@@ -163,13 +166,24 @@ function TripCard({
     return () => clearInterval(id);
   }, [trip.vehicle_id, trip.status]);
 
-  const advance = async (next: TripStatus, label: string) => {
+  const advance = async (path: string, label: string) => {
+    setBusyPath(path);
     try {
-      await api.dispatch.updateStatus(trip.id, next);
-      toast(`${label} — đã cập nhật.`, "success");
+      await api.dispatch.action(trip.id, path);
+      // "Hoàn thành chuyến" no longer ends the trip — it raises a
+      // request a dispatcher has to approve. Say so, or the driver
+      // will think the app failed when the card stays on screen.
+      toast(
+        path === "request-completion"
+          ? "Đã báo hoàn thành. Chờ điều phối duyệt."
+          : `${label} — đã cập nhật.`,
+        "success"
+      );
       onRefresh();
     } catch (err: any) {
       toast(getErrorMessage(err, "Không cập nhật được chuyến."), "error");
+    } finally {
+      setBusyPath(null);
     }
   };
 
@@ -219,16 +233,23 @@ function TripCard({
         ))}
       </ol>
 
-      {action && (
+      {(actions.length > 0 || canReportIssue) && (
         <div className="p-4 border-t border-line bg-sunken space-y-2">
-          <Button
-            variant="primary"
-            size="lg"
-            fullWidth
-            onClick={() => advance(action.next, action.label)}
-          >
-            {action.label}
-          </Button>
+          {/* Driven by the backend's available_actions, so the button
+              a driver sees is always one the server will accept —
+              Nhận chuyến, then Bắt đầu, then Hoàn thành. */}
+          {actions.map((a) => (
+            <Button
+              key={a.path}
+              variant={a.tone === "danger" ? "danger-subtle" : "primary"}
+              size="lg"
+              fullWidth
+              loading={busyPath === a.path}
+              onClick={() => advance(a.path, a.label)}
+            >
+              {a.label}
+            </Button>
+          ))}
 
           {canReportIssue && !reportingIssue && (
             <Button

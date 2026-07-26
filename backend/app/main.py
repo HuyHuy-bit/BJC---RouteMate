@@ -6,6 +6,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from app.api.v1.routes import (
+    admin,
     auth,
     bookings,
     customers,
@@ -49,5 +50,6 @@ app.include_router(customers.router, prefix="/api/v1/customers")
 app.include_router(bookings.router, prefix="/api/v1/bookings")
 app.include_router(dispatch.router, prefix="/api/v1/dispatch")
 app.include_router(payments.router, prefix="/api/v1/payments")
+app.include_router(admin.router, prefix="/api/v1/admin")
 app.include_router(geocode.router, prefix="/api/v1/geocode")
 app.include_router(notifications.router, prefix="/api/v1/notifications")

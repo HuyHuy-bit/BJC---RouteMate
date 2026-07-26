@@ -66,7 +66,11 @@ backend/app/
   requested time window, `is_private` flag, status
   (`queued` / `matched` / `waiting` / `cancelled`)
 - **Trip** — a car assignment: 1–4 bookings, driver/vehicle, computed stop
-  order, status (`forming` / `confirmed` / `in_progress` / `completed`)
+  order, and a status that moves through a role-enforced workflow —
+  the driver accepts, starts and reports completion; a dispatcher signs
+  it off. The full state machine, including who may make each move and
+  which vehicle states follow from it, is **docs/STATE_MACHINE.md**;
+  it is enforced in one place, `app/services/trip_state.py`.
 
 ## 5. Matching algorithm (as built)
 
@@ -105,8 +109,20 @@ Implementation: `app/services/matching.py` + `app/services/route_solver.py`.
 
 - JWT access token (short-lived) + refresh token (longer-lived, stored
   hashed)
-- Roles: `admin` (full access), `dispatcher` (create/edit bookings, run
-  matching), `driver` (read-only view of their own assigned trip)
+- Roles:
+  - `admin` — everything a dispatcher can do, plus the financial and
+    administrative surface: revenue reporting (`/api/v1/admin/*`),
+    waiving fares, staff management.
+  - `dispatcher` — the operation: bookings, merging, assigning vehicles
+    and drivers, sealing, and finalizing completed trips. **No revenue
+    rollups, and cannot start or complete a trip.**
+  - `driver` — their own assigned trips: accept, reject, start, report
+    completion, collect payment. Cannot finalize.
+- Enforcement is server-side and structural. Trip-workflow permissions
+  come from the transition table in `app/services/trip_state.py`, which
+  every status write goes through, rather than from per-endpoint
+  checks — the frontend renders its buttons from the same table via
+  `TripOut.available_actions`, so the two cannot drift apart.
 
 ## 7. Deployment (not yet decided)
 
