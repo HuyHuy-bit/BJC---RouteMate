@@ -733,10 +733,27 @@ def detach_booking_from_trip(
         reservation are released, not left dangling
       - if others remain, their route is re-optimized (stop order, ETAs)
         rather than driving to a stop that's no longer needed
+      - the fare stops being owed: customers pay only AFTER the trip, so
+        a ride that never happened has nothing to collect
     """
     old_trip = booking.trip
     booking.status = new_status
     booking.stop_order = None
+
+    # Close out the fare. Every booking gets a `pending` payment at
+    # creation, and nothing was clearing it here — so a cancelled ride
+    # sat in the books as money owed forever, and any reconciliation
+    # total would have been inflated by fares that were never
+    # collectable. Only touch it while still pending: a payment already
+    # collected, disputed or waived is a real record, not ours to
+    # overwrite.
+    if booking.payment is not None and booking.payment.status == PaymentStatus.pending:
+        booking.payment.status = PaymentStatus.waived
+        booking.payment.notes = (
+            f"Tự động huỷ thu tiền: {reason}"
+            if not booking.payment.notes
+            else f"{booking.payment.notes} | Tự động huỷ thu tiền: {reason}"
+        )
 
     if old_trip is None:
         return
