@@ -69,16 +69,40 @@ ALLOWED_TRANSITIONS: dict[TripStatus, set[TripStatus]] = {
 }
 
 
+# A trip that's over is a historical record — it should still show who
+# cancelled or no-showed, because that IS what happened on that trip.
+# A trip that's still live is an operating instruction, and someone who
+# cancelled is simply not on it any more.
+FINISHED_TRIP_STATUSES = (TripStatus.completed, TripStatus.cancelled)
+
+
 def _to_trip_out(trip: Trip) -> TripOut:
-    bookings_out = [to_booking_out(b) for b in trip.bookings]
+    """
+    Serialize a trip for the API.
+
+    Cancelled and no-show riders are dropped from a LIVE trip. Leaving
+    them in meant the driver's stop list still showed someone who had
+    cancelled (so the car would drive to a pickup nobody was waiting
+    at), and every UI that sums over trip.bookings — seat occupancy,
+    expected revenue — counted them too.
+    """
+    if trip.status in FINISHED_TRIP_STATUSES:
+        relevant = list(trip.bookings)
+    else:
+        relevant = [
+            b
+            for b in trip.bookings
+            if b.status not in (BookingStatus.cancelled, BookingStatus.no_show)
+        ]
+
     return TripOut(
         id=trip.id,
         status=trip.status,
         driver_id=trip.driver_id,
         vehicle_id=trip.vehicle_id,
         vehicle_label=trip.vehicle_label,
-        is_private=len(trip.bookings) == 1 and trip.bookings[0].is_private,
-        bookings=bookings_out,
+        is_private=len(relevant) == 1 and relevant[0].is_private,
+        bookings=[to_booking_out(b) for b in relevant],
         created_at=trip.created_at,
         completed_at=trip.completed_at,
         cancelled_at=trip.cancelled_at,
