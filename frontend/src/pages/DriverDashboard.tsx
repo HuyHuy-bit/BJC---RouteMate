@@ -35,6 +35,7 @@ import {
   fmtDayLabel,
   fmtTime,
   fmtVnd,
+  placeFromLatLng,
   tripActionFor,
 } from "../lib/format";
 
@@ -156,6 +157,13 @@ export default function DriverDashboard() {
 
   const tripCount = tripsQuery.data?.length ?? 0;
   const vehicle = vehicleQuery.data ?? null;
+  // Bắc Giang is home for every car, so "not at Bắc Giang" is the whole
+  // of "away". Reuses the same hub-nearest bucketing the fleet table
+  // uses rather than inventing a second notion of where a car is.
+  const awayFromBase =
+    vehicle !== null &&
+    placeFromLatLng(vehicle.last_location_lat, vehicle.last_location_lng) ===
+      "ha_noi";
 
   return (
     <AppShell
@@ -177,10 +185,24 @@ export default function DriverDashboard() {
         }
         empty={
           <Card>
+            {/* A driver with no trip is not necessarily a driver with
+                nothing going on. After finishing a run in Hà Nội they
+                used to see only "no trips assigned" — no indication of
+                where the system thinks their car is, whether they
+                should wait for a fare, or when they'll be sent home.
+                Say which of those it is. */}
             <EmptyState
               icon={<Car size={18} aria-hidden="true" />}
-              title="Chưa có chuyến nào được giao"
-              description="Khi điều phối viên giao chuyến cho bạn, chuyến sẽ hiện ở đây kèm danh sách khách và thứ tự đón."
+              title={
+                awayFromBase
+                  ? "Đang chờ khách tại Hà Nội"
+                  : "Chưa có chuyến nào được giao"
+              }
+              description={
+                awayFromBase
+                  ? "Bạn đã hoàn thành chuyến và đang ở Hà Nội. Nếu có khách về Bắc Giang, hệ thống sẽ giao chuyến cho bạn. Nếu không, điều phối sẽ gọi xe về — bạn cũng sẽ thấy yêu cầu ngay tại đây."
+                  : "Khi điều phối viên giao chuyến cho bạn, chuyến sẽ hiện ở đây kèm danh sách khách và thứ tự đón."
+              }
             />
           </Card>
         }

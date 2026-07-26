@@ -1,6 +1,16 @@
 import { useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { AlertTriangle, Ban, Car, Clock, Lock, Phone, Users, Wrench } from "lucide-react";
+import {
+  AlertTriangle,
+  Ban,
+  Car,
+  Clock,
+  Home,
+  Lock,
+  Phone,
+  Users,
+  Wrench,
+} from "lucide-react";
 import { api } from "../lib/api";
 import type { AttentionItem } from "../types";
 import { DIRECTION } from "../lib/format";
@@ -33,6 +43,10 @@ const KIND_BADGE: Record<AttentionItem["kind"], { icon: JSX.Element; label: stri
     label: "Xe gặp sự cố",
   },
   escalated: { icon: <Users size={10} aria-hidden="true" />, label: "Thiếu khách" },
+  idle_away: {
+    icon: <Home size={10} aria-hidden="true" />,
+    label: "Xe rảnh ngoài Bắc Giang",
+  },
 };
 
 export default function AttentionPanel() {
@@ -52,7 +66,23 @@ export default function AttentionPanel() {
     queryClient.invalidateQueries({ queryKey: ["bookings"] });
   };
 
+  const handleCallHome = async (item: AttentionItem) => {
+    if (!item.vehicle_id) return;
+    setBusy(item.vehicle_id);
+    try {
+      await api.vehicleReturn.request(item.vehicle_id);
+      toast(`Đã yêu cầu ${item.vehicle_label ?? "xe"} quay về Bắc Giang.`, "success");
+      queryClient.invalidateQueries({ queryKey: ["vehicles"] });
+      refresh();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không gọi được xe về."), "error");
+    } finally {
+      setBusy(null);
+    }
+  };
+
   const handleForceSeal = async (item: AttentionItem) => {
+    if (!item.trip_id) return;  // idle_away carries no trip
     try {
       await api.dispatch.sealTrip(item.trip_id);
       toast("Đã chốt chuyến.", "success");
@@ -63,6 +93,7 @@ export default function AttentionPanel() {
   };
 
   const handleCancelAll = async (item: AttentionItem) => {
+    if (!item.trip_id) return;  // idle_away carries no trip
     try {
       await Promise.all(item.bookings.map((b) => api.bookings.cancel(b.id)));
       toast("Đã huỷ chuyến.", "success");
@@ -73,6 +104,7 @@ export default function AttentionPanel() {
   };
 
   const handleExtendWait = async (item: AttentionItem) => {
+    if (!item.trip_id) return;  // idle_away carries no trip
     setBusy(item.trip_id);
     try {
       await api.dispatch.extendWait(item.trip_id, EXTEND_MINUTES);
@@ -86,6 +118,7 @@ export default function AttentionPanel() {
   };
 
   const handleUpgradePrivate = async (item: AttentionItem) => {
+    if (!item.trip_id) return;  // idle_away carries no trip
     setBusy(item.trip_id);
     try {
       await api.dispatch.upgradePrivate(item.trip_id);
@@ -144,9 +177,13 @@ export default function AttentionPanel() {
                     {KIND_BADGE[item.kind].icon} {KIND_BADGE[item.kind].label}
                   </Badge>
                   <span className="text-xs text-faint">
-                    {DIRECTION[item.direction].label} · {item.passenger_count} khách
+                    {item.direction
+                      ? `${DIRECTION[item.direction].label} · ${item.passenger_count} khách`
+                      : item.vehicle_label}
                     {item.minutes_overdue > 0 &&
-                      ` · trễ ${Math.round(item.minutes_overdue)} phút`}
+                      ` · ${item.kind === "idle_away" ? "rảnh" : "trễ"} ${Math.round(
+                        item.minutes_overdue
+                      )} phút`}
                   </span>
                 </div>
                 <p className="text-base text-ink">{item.reason}</p>
@@ -188,6 +225,18 @@ export default function AttentionPanel() {
                   wait a bit more, sell it as a private hire, send it
                   anyway, or give up. */}
               <div className="flex flex-col gap-1.5 shrink-0">
+                {item.kind === "idle_away" && (
+                  <Button
+                    variant="secondary"
+                    size="sm"
+                    disabled={busy === item.vehicle_id}
+                    iconLeft={<Home size={12} aria-hidden="true" />}
+                    onClick={() => handleCallHome(item)}
+                  >
+                    Gọi xe về
+                  </Button>
+                )}
+
                 {item.kind === "escalated" && (
                   <>
                     <Button

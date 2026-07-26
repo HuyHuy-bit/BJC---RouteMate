@@ -554,6 +554,80 @@ def test_nearest_car_wins_even_when_its_position_is_hours_old(db, world):
     db.rollback()
 
 
+def test_an_idle_car_away_from_base_is_surfaced_and_eventually_sent_home(
+    client, db, world
+):
+    """
+    The reported logic flaw: a car finishes in Hà Nội and then nothing
+    happens. The driver saw an empty screen, the dispatcher was never
+    asked, and the car sat there until the 22:00 sweep.
+
+    Now it reaches the attention panel first (so a human can hold it for
+    a return fare) and is sent home automatically if nobody does.
+    """
+    from app.core.dispatch_config import IDLE_AWAY_RETURN_MINUTES
+    from app.services.vehicle_return import send_idle_vehicles_home
+
+    vehicle, driver, dispatcher = world["vehicle"], world["driver"], world["dispatcher"]
+
+    # Actually finish the outbound run, rather than faking the end state
+    # — the trip has to be off the car or nothing may send it home.
+    url = world["url"]
+    for step in ("accept", "start", "request-completion"):
+        client.post(f"{url}/{step}", headers=auth(driver))
+    client.post(f"{url}/finalize", headers=auth(dispatcher))
+
+    # Parked in Hà Nội and idle for longer than the auto-return
+    # threshold — exactly what a finished outbound run leaves behind.
+    db.expire_all()
+    vehicle = db.get(Vehicle, vehicle.id)
+    vehicle.last_location = _point(HA_NOI)
+    vehicle.last_location_at = datetime.now(timezone.utc) - timedelta(
+        minutes=IDLE_AWAY_RETURN_MINUTES + 5
+    )
+    db.commit()
+
+    items = client.get(
+        "/api/v1/dispatch/attention", headers=auth(world["dispatcher"])
+    ).json()
+    idle = [i for i in items if i["kind"] == "idle_away"]
+    assert idle, "an idle car away from base never reached the dispatcher"
+    mine = next(i for i in idle if i["vehicle_id"] == str(vehicle.id))
+    assert mine["vehicle_label"], "the dispatcher needs to know WHICH car"
+    assert mine["trip_id"] is None, "this item is about a vehicle, not a trip"
+
+    # Nobody acted, so the tick sends it home on its own. It leaves the
+    # commit to run_dispatch_cycle, so commit here before re-reading.
+    assert send_idle_vehicles_home(db) >= 1
+    db.commit()
+    db.expire_all()
+    assert db.get(Vehicle, vehicle.id).status is VehicleStatus.returning
+
+
+def test_a_car_idle_at_base_is_left_alone(client, db, world):
+    """Sitting at Bắc Giang is where a car is supposed to be — it must
+    not generate a prompt or a return request."""
+    from app.services.vehicle_return import send_idle_vehicles_home
+
+    vehicle = world["vehicle"]
+    vehicle.status = VehicleStatus.available
+    vehicle.last_location = _point(BAC_GIANG)
+    vehicle.last_location_at = datetime.now(timezone.utc) - timedelta(days=2)
+    db.commit()
+
+    items = client.get(
+        "/api/v1/dispatch/attention", headers=auth(world["dispatcher"])
+    ).json()
+    assert not [
+        i for i in items
+        if i["kind"] == "idle_away" and i["vehicle_id"] == str(vehicle.id)
+    ]
+
+    send_idle_vehicles_home(db)
+    db.expire_all()
+    assert db.get(Vehicle, vehicle.id).status is VehicleStatus.available
+
+
 def test_driver_can_find_their_own_car(client, world):
     r = client.get("/api/v1/vehicles/mine", headers=auth(world["driver"]))
     assert r.status_code == 200

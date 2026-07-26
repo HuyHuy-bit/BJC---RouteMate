@@ -7,10 +7,14 @@ has to get back to Bắc Giang, and until it does, dispatch's picture of
 where the fleet is spends the night wrong — the next morning's first
 booking would be matched against yesterday's last dropoff.
 
-Two ways home, matching how the business actually works:
+Three ways home, matching how the business actually works:
 
   * a dispatcher calls a car back early, when Hà Nội has no demand left
-  * the end-of-day sweep sends home whatever is still out there
+  * a car left idle away from base past IDLE_AWAY_RETURN_MINUTES is sent
+    back on its own — otherwise a car that finished at 09:00 sat in Hà
+    Nội until 22:00 while the driver stared at an empty screen and
+    nobody was ever asked to decide
+  * the end-of-day sweep catches whatever is still out there
 
 Both put the car in `returning` and leave a `return_requested_at`
 stamp. The driver confirming arrival is what actually moves the
@@ -33,7 +37,10 @@ from geoalchemy2.shape import to_shape
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.dispatch_config import AT_BASE_RADIUS_METERS
+from app.core.dispatch_config import (
+    AT_BASE_RADIUS_METERS,
+    IDLE_AWAY_RETURN_MINUTES,
+)
 from app.models.corridor import Corridor
 from app.models.enums import DispatchEventType, VehicleStatus
 from app.models.trip import Trip
@@ -199,6 +206,92 @@ def cancel_return(db: Session, vehicle: Vehicle, actor: User | None) -> None:
         actor,
         "return called off",
     )
+
+
+def idle_away_from_base(db: Session, minutes: int) -> list[tuple[Vehicle, float]]:
+    """
+    Free cars sitting away from base for longer than `minutes`, with how
+    long each has been idle.
+
+    "Idle since" is read off `last_location_at`, which is written when a
+    trip is finalized — so for a car that just finished a run it is
+    exactly the moment it arrived. Nothing pings a car once it is
+    `available` (the driver's app only reports position during a trip),
+    so the value stays put rather than drifting.
+
+    Returns an empty list rather than raising when a car has no known
+    position: unknown is not the same as away.
+    """
+    now = datetime.now(timezone.utc)
+    candidates = (
+        db.execute(select(Vehicle).where(Vehicle.status == VehicleStatus.available))
+        .scalars()
+        .all()
+    )
+
+    # Cars a trip still holds, even though their own status says
+    # available. Excluded because request_return refuses them anyway —
+    # surfacing one would put a "Gọi xe về" button on the dispatcher's
+    # panel whose only possible outcome is a 409.
+    committed_vehicle_ids = set(
+        db.execute(
+            select(Trip.vehicle_id)
+            .where(Trip.vehicle_id.isnot(None))
+            .where(Trip.status.in_(VEHICLE_COMMITTED_STATUSES))
+        )
+        .scalars()
+        .all()
+    )
+
+    idle: list[tuple[Vehicle, float]] = []
+    for vehicle in candidates:
+        if vehicle.id in committed_vehicle_ids:
+            continue
+        if vehicle.last_location is None or vehicle.last_location_at is None:
+            continue
+        if is_at_base(db, vehicle):
+            continue
+        since = vehicle.last_location_at
+        if since.tzinfo is None:
+            since = since.replace(tzinfo=timezone.utc)
+        idle_minutes = (now - since).total_seconds() / 60
+        if idle_minutes >= minutes:
+            idle.append((vehicle, idle_minutes))
+
+    return idle
+
+
+def send_idle_vehicles_home(db: Session) -> int:
+    """
+    Send home any car that has been free and away from base longer than
+    IDLE_AWAY_RETURN_MINUTES.
+
+    Runs on the ordinary dispatch tick, not just at end of day. Without
+    it a car that finished in Hà Nội at 09:00 sat there until 22:00 with
+    nobody deciding anything — the driver saw an empty screen and the
+    dispatcher was never asked the question.
+
+    Does NOT commit, unlike send_stranded_vehicles_home: this runs
+    inside run_dispatch_cycle, which commits everything the tick did in
+    one transaction. Its end-of-day sibling has no such caller and so
+    has to commit itself.
+    """
+    sent = 0
+    for vehicle, _minutes in idle_away_from_base(db, IDLE_AWAY_RETURN_MINUTES):
+        try:
+            request_return(
+                db,
+                vehicle,
+                actor=None,
+                reason=f"idle away from base for over {IDLE_AWAY_RETURN_MINUTES} min",
+            )
+        except ReturnError:
+            continue
+        sent += 1
+
+    if sent:
+        logger.info("idle sweep: asked %s vehicle(s) to head back to base", sent)
+    return sent
 
 
 def send_stranded_vehicles_home(db: Session) -> int:

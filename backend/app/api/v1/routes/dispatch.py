@@ -49,6 +49,11 @@ from app.services.dispatch_service import (
     upgrade_to_private,
 )
 from app.services.notification_service import notify_driver_assigned
+from app.core.dispatch_config import (
+    IDLE_AWAY_ATTENTION_MINUTES,
+    IDLE_AWAY_RETURN_MINUTES,
+)
+from app.services.vehicle_return import idle_away_from_base
 from app.services.trip_state import (
     DRIVER_ACTIVE_STATUSES,
     TransitionError,
@@ -396,6 +401,28 @@ def list_attention_items(
         .filter(Trip.bookings.any())
         .all()
     )
+    # Free cars parked away from base. Nothing surfaced these before:
+    # a car that finished in Hà Nội at 09:00 simply sat there, its
+    # driver looking at an empty screen, until the end-of-day sweep at
+    # 22:00 — and the one person who could have decided otherwise was
+    # never asked. Raised well before the automatic send-home so a
+    # dispatcher who knows a return fare is coming can hold the car.
+    for vehicle, idle_minutes in idle_away_from_base(
+        db, IDLE_AWAY_ATTENTION_MINUTES
+    ):
+        items.append(
+            AttentionItem(
+                kind="idle_away",
+                vehicle_id=vehicle.id,
+                vehicle_label=vehicle.label or vehicle.plate_number,
+                minutes_overdue=round(idle_minutes),
+                reason=(
+                    f"Xe đang rảnh ngoài Bắc Giang {round(idle_minutes)} phút — "
+                    f"tự động gọi về sau {IDLE_AWAY_RETURN_MINUTES} phút"
+                ),
+            )
+        )
+
     for trip in disrupted_trips:
         active = [
             b for b in trip.bookings if b.status.value not in ("cancelled", "no_show")

@@ -158,3 +158,19 @@ OPERATING_DAY_END_HOUR_LOCAL = 22
 # base", so the sweep and the manual call-home skip cars that are
 # already there instead of issuing pointless return instructions.
 AT_BASE_RADIUS_METERS = 3_000
+
+# How long a free car may sit away from base before the system sends it
+# home on its own, rather than leaving it parked in Hà Nội earning
+# nothing until the end of the day.
+#
+# Matched to RETURN_VEHICLE_MATCH_WINDOW_MINUTES on purpose: that is
+# already the furthest ahead a return booking will be matched to a car
+# heading back, so beyond it there is no fare this car could plausibly
+# still be waiting for. Waiting longer is just an idle car.
+IDLE_AWAY_RETURN_MINUTES = 60
+
+# How long a car has to be idle away from base before it shows up on the
+# dispatcher's attention panel. Deliberately well short of the automatic
+# send-home above, so a human gets the chance to decide first — they may
+# know a return fare is about to be booked.
+IDLE_AWAY_ATTENTION_MINUTES = 15

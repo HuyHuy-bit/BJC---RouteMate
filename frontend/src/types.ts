@@ -255,14 +255,18 @@ export interface TripReportIssue {
 }
 
 export interface AttentionItem {
-  kind: "escalated" | "no_vehicle" | "vehicle_down";
-  trip_id: string;
-  direction: BookingDirection;
-  passenger_count: number;
-  minutes_overdue: number;
+  kind: "escalated" | "no_vehicle" | "vehicle_down" | "idle_away";
   reason: string;
+  minutes_overdue: number;
+  /** Null for `idle_away`, which is about a car with no trip at all. */
+  trip_id: string | null;
+  direction: BookingDirection | null;
+  passenger_count: number;
   options: string[] | null;
   bookings: BookingOut[];
+  /** Set for `idle_away`, where the car is the subject. */
+  vehicle_id: string | null;
+  vehicle_label: string | null;
 }
 
 export interface MergeTripsResult {

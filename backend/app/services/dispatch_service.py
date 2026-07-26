@@ -44,6 +44,7 @@ from app.services.trip_state import (
     VEHICLE_COMMITTED_STATUSES,
     apply_transition,
 )
+from app.services.vehicle_return import send_idle_vehicles_home
 from app.services.dispatch_engine import (
     PoolSnapshot,
     SealDecision,
@@ -1507,6 +1508,12 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
         else:
             sealed += 1
 
+    # Last, deliberately: a car is only sent home once everything else
+    # in this tick has had its chance to want it. Running earlier would
+    # let a pool that seals moments later find its nearest car already
+    # driving away empty.
+    sent_home = send_idle_vehicles_home(db)
+
     db.commit()
     summary = {
         "newly_matched": newly_matched,
@@ -1518,6 +1525,7 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
         "blocked_no_vehicle": no_vehicle,
         "reassigned": reassigned,
         "crewed_from_waiting": crewed,
+        "sent_home_idle": sent_home,
     }
     if (
         newly_matched
@@ -1528,6 +1536,7 @@ def run_dispatch_cycle(db: Session, now: datetime | None = None) -> dict:
         or no_vehicle
         or reassigned
         or crewed
+        or sent_home
     ):
         logger.info("dispatch cycle: %s", summary)
     return summary

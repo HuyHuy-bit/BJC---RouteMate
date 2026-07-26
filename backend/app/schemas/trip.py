@@ -83,22 +83,33 @@ class TripExtendWait(BaseModel):
 
 class AttentionItem(BaseModel):
     """
-    A trip that needs a human decision right now — a forming pool that
-    couldn't fill by deadline (escalated), the fleet is fully committed
-    (no_vehicle), or a trip a driver reported disrupted couldn't find a
-    replacement vehicle on its own (vehicle_down). Previously these were
-    only ever written to the dispatch_events audit log; nothing ever
-    surfaced them to a dispatcher.
+    Something that needs a human decision right now — a forming pool
+    that couldn't fill by deadline (escalated), the fleet being fully
+    committed (no_vehicle), a disrupted trip that couldn't find a
+    replacement vehicle on its own (vehicle_down), or a free car left
+    sitting away from base (idle_away). Previously these were only ever
+    written to the dispatch_events audit log; nothing ever surfaced
+    them to a dispatcher.
+
+    Most kinds are about a TRIP, but `idle_away` is about a VEHICLE with
+    no trip at all — which is exactly why it went unnoticed. Hence the
+    trip fields being optional rather than a second endpoint: a
+    dispatcher wants one list of things to deal with, not two.
     """
 
-    kind: str  # "escalated" | "no_vehicle" | "vehicle_down"
-    trip_id: uuid.UUID
-    direction: str
-    passenger_count: int
-    minutes_overdue: float
+    kind: str  # "escalated" | "no_vehicle" | "vehicle_down" | "idle_away"
     reason: str
-    options: list[str] | None
-    bookings: list[BookingOut]
+    minutes_overdue: float
+
+    trip_id: uuid.UUID | None = None
+    direction: str | None = None
+    passenger_count: int = 0
+    options: list[str] | None = None
+    bookings: list[BookingOut] = []
+
+    # Set for `idle_away`, where the car IS the subject.
+    vehicle_id: uuid.UUID | None = None
+    vehicle_label: str | None = None
 
 
 class MergeTripsResult(BaseModel):
