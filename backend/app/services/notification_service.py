@@ -1,29 +1,72 @@
 """
-Composes customer-facing messages and logs them.
+Composes customer-facing messages.
 
-No real delivery channel is wired up — this project has no Zalo OA or
-SMS gateway credentials. Faking a "delivered" status would be worse than
-not having this at all, since staff would trust a message went out when
-it didn't. Instead, every notification is composed here, stored, and
-surfaced to staff (see /api/v1/notifications) so a dispatcher can read it
-and manually call or text the customer until a real channel exists.
+WHAT to say lives here; HOW it reaches the customer lives in
+messaging.py. Today that means every message is stored and surfaced to
+staff (see /api/v1/notifications) to relay by phone, because this
+business has no Zalo Official Account yet — but no caller here knows or
+cares which channel is in use, so connecting a real one later changes
+nothing in this file.
 
-Swapping in a real provider later means adding a `channel="zalo"` (or
-"sms") branch here that actually calls out, and changing `status` from
-"pending_manual_relay" to "sent"/"failed" based on the real result — the
-rest of the system (composition, storage, the staff-facing list) doesn't
-change.
+Each message records the channel and status it actually got, rather
+than a hardcoded assumption, so the moment a real channel exists this
+table becomes a genuine delivery log instead of a manual-relay queue.
 """
+
+from collections.abc import Callable
+from uuid import UUID
 
 from sqlalchemy.orm import Session
 
 from app.models.booking import Booking
 from app.models.notification import Notification
 from app.models.trip import Trip
+from app.services.messaging import deliver
 
 
 def _fmt_time(dt) -> str:
     return dt.strftime("%H:%M") if dt else "chưa xác định"
+
+
+def _queue(
+    db: Session,
+    booking: Booking,
+    trip_id: UUID | None,
+    event: str,
+    message: str,
+) -> Notification:
+    """
+    Hand one composed message to the delivery layer and record what
+    actually happened to it. Single choke point on purpose — five
+    notify_* functions used to construct this row themselves, so a
+    change to how delivery is tracked meant editing all five.
+    """
+    result = deliver(phone=booking.customer.phone, message=message)
+    note = Notification(
+        booking_id=booking.id,
+        trip_id=trip_id,
+        event=event,
+        message=message,
+        channel=result.channel,
+        status=result.status,
+    )
+    db.add(note)
+    return note
+
+
+def _queue_for_trip(
+    db: Session,
+    trip: Trip,
+    event: str,
+    compose: Callable[[Booking], str],
+) -> list[Notification]:
+    """Message every rider still actually on `trip`."""
+    created = []
+    for booking in trip.bookings:
+        if booking.status.value in ("cancelled", "no_show"):
+            continue
+        created.append(_queue(db, booking, trip.id, event, compose(booking)))
+    return created
 
 
 def _compose_sealed_message(booking: Booking, trip: Trip) -> str:
@@ -75,48 +118,34 @@ def _compose_wait_extended_message(booking: Booking, extra_minutes: int) -> str:
 
 def notify_trip_sealed(db: Session, trip: Trip) -> list[Notification]:
     """Called once a pool is sealed — the customer's ride is now real."""
-    created = []
-    for booking in trip.bookings:
-        if booking.status.value in ("cancelled", "no_show"):
-            continue
-        note = Notification(
-            booking_id=booking.id,
-            trip_id=trip.id,
-            event="sealed",
-            message=_compose_sealed_message(booking, trip),
-        )
-        db.add(note)
-        created.append(note)
-    return created
+    return _queue_for_trip(
+        db, trip, "sealed", lambda b: _compose_sealed_message(b, trip)
+    )
 
 
 def notify_driver_assigned(
     db: Session, trip: Trip, driver_name: str | None
 ) -> list[Notification]:
-    created = []
-    for booking in trip.bookings:
-        if booking.status.value in ("cancelled", "no_show"):
-            continue
-        note = Notification(
-            booking_id=booking.id,
-            trip_id=trip.id,
-            event="driver_assigned",
-            message=_compose_driver_assigned_message(booking, trip, driver_name),
-        )
-        db.add(note)
-        created.append(note)
-    return created
+    """Riders were told a car was coming when the trip sealed; this says
+    who is actually driving it."""
+    return _queue_for_trip(
+        db,
+        trip,
+        "driver_assigned",
+        lambda b: _compose_driver_assigned_message(b, trip, driver_name),
+    )
 
 
 def notify_booking_cancelled(db: Session, booking: Booking, reason: str) -> Notification:
-    note = Notification(
-        booking_id=booking.id,
-        trip_id=booking.trip_id,
-        event="cancelled",
-        message=_compose_cancelled_message(booking, reason),
+    """One rider's booking is off — unlike the others, this is addressed
+    to a single booking rather than everyone on a trip."""
+    return _queue(
+        db,
+        booking,
+        booking.trip_id,
+        "cancelled",
+        _compose_cancelled_message(booking, reason),
     )
-    db.add(note)
-    return note
 
 
 def notify_trip_disrupted(db: Session, trip: Trip) -> list[Notification]:
@@ -124,19 +153,7 @@ def notify_trip_disrupted(db: Session, trip: Trip) -> list[Notification]:
     dispatch_service.py:report_trip_disrupted. A replacement-vehicle
     assignment (or lack of one) is notified separately, same as any
     other seal, via notify_trip_sealed."""
-    created = []
-    for booking in trip.bookings:
-        if booking.status.value in ("cancelled", "no_show"):
-            continue
-        note = Notification(
-            booking_id=booking.id,
-            trip_id=trip.id,
-            event="disrupted",
-            message=_compose_disrupted_message(booking),
-        )
-        db.add(note)
-        created.append(note)
-    return created
+    return _queue_for_trip(db, trip, "disrupted", _compose_disrupted_message)
 
 
 def notify_wait_extended(
@@ -144,18 +161,10 @@ def notify_wait_extended(
 ) -> list[Notification]:
     """Called when a dispatcher gives an under-filled pool more time —
     see dispatch_service.py:extend_pool_wait. Someone who was promised a
-    departure and is now waiting longer deserves to be told, even if
-    (for now) a staff member has to relay it by hand."""
-    created = []
-    for booking in trip.bookings:
-        if booking.status.value in ("cancelled", "no_show"):
-            continue
-        note = Notification(
-            booking_id=booking.id,
-            trip_id=trip.id,
-            event="wait_extended",
-            message=_compose_wait_extended_message(booking, extra_minutes),
-        )
-        db.add(note)
-        created.append(note)
-    return created
+    departure and is now waiting longer deserves to be told."""
+    return _queue_for_trip(
+        db,
+        trip,
+        "wait_extended",
+        lambda b: _compose_wait_extended_message(b, extra_minutes),
+    )

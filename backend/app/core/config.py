@@ -28,6 +28,12 @@ class Settings(BaseSettings):
     goong_api_key: str = ""
     goong_maptiles_key: str = ""
 
+    # Zalo Official Account. Empty = no OA registered yet, which is the
+    # current state: customer messages are composed and queued for staff
+    # to relay by phone. Setting a real token is the switch that turns
+    # automatic delivery on — see app/services/messaging.py.
+    zalo_oa_token: str = ""
+
     # CORS
     cors_origins: str = "http://localhost:5173"
 
