@@ -640,12 +640,23 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
     # end of the corridor could get sent to a pickup at the other end
     # while a closer car sat idle. Order by real distance to where this
     # trip actually needs a car (its centroid, already maintained by
-    # _refresh_pool_geometry); a vehicle with no known OR STALE location
-    # sorts last rather than being excluded outright — never block a
-    # trip's departure over a location-tracking gap. A ping older than
-    # VEHICLE_LOCATION_STALE_MINUTES is treated identically to no ping at
-    # all: a phone that stopped reporting an hour ago is not still
-    # telling the truth about where the car is.
+    # _refresh_pool_geometry).
+    #
+    # Only a car with NO recorded position sorts last. Age is
+    # deliberately NOT a penalty here, which it used to be
+    # (VEHICLE_LOCATION_STALE_MINUTES): every candidate in this query is
+    # `available`, meaning parked and not on a trip, and a parked car
+    # has not moved since whenever its position was last confirmed. The
+    # staleness rule was written for a car in MOTION whose phone stopped
+    # reporting — a real concern, but not one that applies to anything
+    # this query can return.
+    #
+    # Penalising age here had a perverse effect in practice: the only
+    # car with a fresh timestamp is one whose driver has the app open
+    # pinging every 30s, so dispatch always picked THAT car no matter
+    # where it was, while cars whose position was confirmed at
+    # finalization — a more reliable fact than a GPS ping — were all
+    # treated as "location unknown, assume far away" and tied for last.
     base_query = (
         select(Vehicle)
         .where(Vehicle.status == VehicleStatus.available)
@@ -670,12 +681,8 @@ def _assign_vehicle(db: Session, trip: Trip) -> Vehicle | None:
         .with_for_update(skip_locked=True)
     )
     if trip.centroid is not None:
-        stale_cutoff = datetime.now(timezone.utc) - timedelta(
-            minutes=VEHICLE_LOCATION_STALE_MINUTES
-        )
         order_expr = case(
-            (Vehicle.last_location_at.is_(None), 1_000_000_000),
-            (Vehicle.last_location_at < stale_cutoff, 1_000_000_000),
+            (Vehicle.last_location.is_(None), 1_000_000_000),
             else_=func.coalesce(
                 func.ST_Distance(Vehicle.last_location, trip.centroid), 1_000_000_000
             ),

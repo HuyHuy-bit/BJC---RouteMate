@@ -504,6 +504,56 @@ def test_deleting_a_customer_does_not_strand_their_cars_vehicle(client, db, worl
     assert gone is None, "the emptied trip should be gone"
 
 
+def test_nearest_car_wins_even_when_its_position_is_hours_old(db, world):
+    """
+    Regression, reported from real use: a car in Hà Nội kept being
+    assigned to Bắc Giang pickups.
+
+    The ordering penalised any position older than
+    VEHICLE_LOCATION_STALE_MINUTES as "unknown, assume far away". In
+    practice the ONLY car with a fresh timestamp is one whose driver has
+    the app open pinging every 30s — so dispatch always picked that car
+    wherever it was, and every car whose position was confirmed at
+    finalization tied for last.
+
+    Age is not evidence of having moved. Every candidate here is
+    `available`, meaning parked.
+    """
+    from app.services.dispatch_service import _assign_vehicle
+
+    corridor = world["corridor"]
+    now = datetime.now(timezone.utc)
+    tag = uuid.uuid4().hex[:6]
+
+    far_fresh = Vehicle(
+        plate_number=f"HN-{tag}", label="far, fresh ping", seat_capacity=4,
+        status=VehicleStatus.available, home_corridor_id=corridor.id,
+        last_location=_point(HA_NOI), last_location_at=now - timedelta(minutes=2),
+    )
+    near_stale = Vehicle(
+        plate_number=f"BG-{tag}", label="near, 8h old", seat_capacity=4,
+        status=VehicleStatus.available, home_corridor_id=corridor.id,
+        last_location=_point(BAC_GIANG), last_location_at=now - timedelta(hours=8),
+    )
+    db.add_all([far_fresh, near_stale])
+    db.flush()
+
+    probe = Trip(
+        corridor_id=corridor.id, direction=BookingDirection.outbound,
+        status=TripStatus.forming, centroid=_point(BAC_GIANG),
+    )
+    db.add(probe)
+    db.flush()
+
+    picked = _assign_vehicle(db, probe)
+    assert picked is not None
+    assert picked.id == near_stale.id, (
+        "a Bắc Giang pickup took the Hà Nội car because it happened to "
+        "have a fresher GPS ping"
+    )
+    db.rollback()
+
+
 def test_driver_can_find_their_own_car(client, world):
     r = client.get("/api/v1/vehicles/mine", headers=auth(world["driver"]))
     assert r.status_code == 200
