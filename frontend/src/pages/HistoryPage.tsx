@@ -112,7 +112,7 @@ export default function HistoryPage() {
   const totalRevenue = useMemo(
     () =>
       filtered.reduce(
-        (sum, t) => sum + t.bookings.reduce((s, b) => s + b.price_vnd, 0),
+        (sum, t) => sum + t.bookings.reduce((s, b) => s + (b.price_vnd ?? 0), 0),
         0
       ),
     [filtered]
@@ -180,17 +180,15 @@ export default function HistoryPage() {
     },
   ];
 
-  // Revenue per trip and the running total are money ROLLUPS, which
-  // requirements §3 makes admin-only. Dispatchers still see each
-  // booking's own fare on the trip detail — what they lose is the
-  // aggregate, which is the business's income, not an operational fact
-  // they need to route a car.
+  // Admin-only. A dispatcher's payload carries no fares at all, so
+  // this column would sum a page of nulls to a confident zero — worse
+  // than absent, because a zero looks like a fact.
   if (isAdmin) {
     columns.push({
       header: "Doanh thu",
       align: "right",
       className: "tnum",
-      cell: (t) => fmtVnd(t.bookings.reduce((s, b) => s + b.price_vnd, 0)),
+      cell: (t) => fmtVnd(t.bookings.reduce((s, b) => s + (b.price_vnd ?? 0), 0)),
       total: fmtVnd(totalRevenue),
     });
   }

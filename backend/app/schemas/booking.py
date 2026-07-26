@@ -52,8 +52,20 @@ class BookingOut(BaseModel):
     direction: BookingDirection
     is_private: bool
     seats: int
-    price_vnd: int
     status: BookingStatus
     trip_id: uuid.UUID | None
-    payment: PaymentOut | None
     created_at: datetime
+
+    # --- Money: null for dispatchers, always ---
+    # Dispatchers run the operation and have no business role in the
+    # money, so these are stripped SERVER-SIDE rather than hidden in the
+    # UI (see booking_service.to_booking_out). Admins see everything;
+    # drivers see it on their own trips because they collect the cash
+    # at the door and need to know what to ask for.
+    #
+    # Optional rather than a separate schema so one response model
+    # serves every caller — the field is simply absent of content for
+    # anyone not entitled to it, and no route can accidentally return
+    # the wrong shape.
+    price_vnd: int | None = None
+    payment: PaymentOut | None = None

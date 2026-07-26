@@ -52,16 +52,19 @@ def collect_payment(
     """
     booking = _load_booking_with_payment(db, booking_id)
 
-    is_staff = current_user.role in (UserRole.admin, UserRole.dispatcher)
+    # Dispatchers lost this along with the rest of the financial
+    # surface: they never handle the cash, and recording a collection
+    # they didn't take is not an operational act. The driver at the
+    # door does it; an admin can do it on their behalf.
     is_assigned_driver = (
         current_user.role == UserRole.driver
         and booking.trip is not None
         and booking.trip.driver_id == current_user.id
     )
-    if not (is_staff or is_assigned_driver):
+    if not (current_user.role is UserRole.admin or is_assigned_driver):
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
-            detail="Only staff or this trip's driver can record a payment",
+            detail="Only this trip's driver or an admin can record a payment",
         )
 
     payment = booking.payment

@@ -1,6 +1,14 @@
 import { useState, type ReactNode } from "react";
 import { Link, useLocation } from "react-router-dom";
-import { Car, History, LogOut, Moon, Sun, UserPlus } from "lucide-react";
+import {
+  Car,
+  History,
+  LogOut,
+  Moon,
+  Sun,
+  TrendingUp,
+  UserPlus,
+} from "lucide-react";
 import { useAuth } from "../../context/AuthContext";
 import Button from "../ui/Button";
 import { ROLE_LABEL } from "../../lib/format";
@@ -91,6 +99,18 @@ export default function AppShell({
 
               {(user?.role === "admin" || user?.role === "dispatcher") && (
                 <NavLink to="/fleet" icon={<Car size={15} />} label="Đội xe" />
+              )}
+
+              {/* Admin-only, and the only entry point to money in this
+                  app. A dispatcher never sees the link because they
+                  can never see the page — the route and the API both
+                  refuse them. */}
+              {user?.role === "admin" && (
+                <NavLink
+                  to="/business"
+                  icon={<TrendingUp size={15} />}
+                  label="Kinh doanh"
+                />
               )}
 
               {user?.role === "admin" && (

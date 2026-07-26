@@ -106,6 +106,7 @@ export const VEHICLE_STATUS: Record<
   available: { label: "Sẵn sàng", tone: "success" },
   assigned: { label: "Đã phân chuyến", tone: "info" },
   on_trip: { label: "Đang chạy", tone: "info" },
+  returning: { label: "Đang về Bắc Giang", tone: "warning" },
   maintenance: { label: "Bảo dưỡng", tone: "warning" },
   offline: { label: "Ngừng hoạt động", tone: "neutral" },
 };

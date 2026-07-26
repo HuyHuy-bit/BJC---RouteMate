@@ -69,7 +69,7 @@ def create_booking_route(
         db.rollback()
 
     db.refresh(booking)
-    return to_booking_out(booking)
+    return to_booking_out(booking, current_user)
 
 
 @router.get("", response_model=list[BookingOut])
@@ -78,7 +78,15 @@ def list_bookings(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
 ):
-    query = db.query(Booking).options(joinedload(Booking.customer), joinedload(Booking.payment))
+    # Booking.trip is eager-loaded because the money-visibility rule
+    # reads it: a driver may see fares on their OWN trips, which means
+    # comparing trip.driver_id. Lazy-loading it would issue a query per
+    # booking on a list endpoint.
+    query = db.query(Booking).options(
+        joinedload(Booking.customer),
+        joinedload(Booking.payment),
+        joinedload(Booking.trip),
+    )
     if status_filter:
         query = query.filter(Booking.status == status_filter)
     bookings = query.order_by(Booking.created_at.desc()).all()
@@ -92,7 +100,7 @@ def list_bookings(
             target_id=b.id,
         )
     db.commit()
-    return [to_booking_out(b) for b in bookings]
+    return [to_booking_out(b, current_user) for b in bookings]
 
 
 @router.get("/{booking_id}", response_model=BookingOut)
@@ -120,7 +128,7 @@ def get_booking(
         target_id=booking.id,
     )
     db.commit()
-    return to_booking_out(booking)
+    return to_booking_out(booking, current_user)
 
 
 @router.delete("/{booking_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -210,7 +218,7 @@ def mark_no_show(
     )
     db.commit()
     db.refresh(booking)
-    return to_booking_out(booking)
+    return to_booking_out(booking, current_user)
 
 
 @router.post("/{booking_id}/unassign", response_model=BookingOut)
@@ -255,4 +263,4 @@ def unassign_booking(
     booking.trip = None
     db.commit()
     db.refresh(booking)
-    return to_booking_out(booking)
+    return to_booking_out(booking, current_user)

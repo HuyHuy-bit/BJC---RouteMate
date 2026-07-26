@@ -51,6 +51,11 @@ class VehicleOut(BaseModel):
     last_location_lat: float | None = None
     last_location_lng: float | None = None
 
+    # Non-null exactly when a return to base is outstanding — the same
+    # single source of truth the model uses, so a client never has to
+    # infer "is this car being called home?" from the status alone.
+    return_requested_at: datetime | None = None
+
     model_config = {"from_attributes": True}
 
 

@@ -150,9 +150,14 @@ export default function BookingsList({
                   even once revealed. Now they are always present, in a
                   quiet tone that lifts on hover, at 44px. */}
               <div className="flex items-center gap-0.5 shrink-0">
-                <span className="text-base font-medium tnum text-ink mr-1.5">
-                  {fmtVnd(b.price_vnd)}
-                </span>
+                {/* Absent for dispatchers — the server sends no fare at
+                    all, so there is nothing to render rather than a
+                    hidden-but-present number. */}
+                {b.price_vnd !== null && (
+                  <span className="text-base font-medium tnum text-ink mr-1.5">
+                    {fmtVnd(b.price_vnd)}
+                  </span>
+                )}
 
                 {canUnassign && (
                   <Button

@@ -135,6 +135,10 @@ def world(db):
     vehicle = Vehicle(
         plate_number=f"29A-{tag[:5]}", label=f"Car-{tag[:4]}", seat_capacity=4,
         status=VehicleStatus.assigned, home_corridor_id=corridor.id,
+        # default_driver_id is the only durable driver->car link, and is
+        # what GET /vehicles/mine and the confirm-return permission both
+        # resolve through.
+        default_driver_id=driver.id,
         last_location=_point(BAC_GIANG),
         last_location_at=datetime.now(timezone.utc),
     )
@@ -305,9 +309,172 @@ def test_driver_keeps_the_trip_on_their_dashboard_until_signed_off(client, world
 
 
 @pytest.mark.parametrize("actor_key", ["dispatcher", "driver"])
-def test_revenue_summary_is_admin_only(client, world, actor_key):
-    r = client.get("/api/v1/admin/revenue-summary", headers=auth(world[actor_key]))
+@pytest.mark.parametrize("path", ["/revenue-summary", "/dashboard"])
+def test_admin_endpoints_are_admin_only(client, world, actor_key, path):
+    r = client.get(f"/api/v1/admin{path}", headers=auth(world[actor_key]))
     assert r.status_code == 403
+
+
+def test_admin_dashboard_survives_an_empty_window(client, world):
+    """A window with no finalized trips must not divide by zero — the
+    averages are the trap, and a fresh install hits it immediately."""
+    r = client.get("/api/v1/admin/dashboard?days=7", headers=auth(world["admin"]))
+    assert r.status_code == 200
+    d = r.json()
+    assert d["avg_revenue_per_trip_vnd"] >= 0
+    assert d["avg_seats_per_trip"] >= 0
+    assert isinstance(d["daily"], list)
+
+
+def test_dispatcher_sees_no_money_on_any_booking_endpoint(client, world):
+    """
+    Requirements §2, the whole of it: no fare and no payment reaches a
+    dispatcher from anywhere that carries a booking.
+    """
+    disp = world["dispatcher"]
+    for url, is_flat in [
+        ("/api/v1/dispatch/trips", False),
+        ("/api/v1/dispatch/history", False),
+        ("/api/v1/bookings", True),
+    ]:
+        r = client.get(url, headers=auth(disp))
+        assert r.status_code == 200, url
+        payload = r.json()
+        rows = payload if is_flat else [b for t in payload for b in t["bookings"]]
+        assert all(b["price_vnd"] is None for b in rows), url
+        assert all(b["payment"] is None for b in rows), url
+
+
+def test_driver_sees_fares_only_on_their_own_trips(client, db, world):
+    """They collect the cash at the door, so they need the number —
+    but only for the car they are actually driving."""
+    mine = client.get("/api/v1/dispatch/my-trips", headers=auth(world["driver"])).json()
+    assert any(
+        b["price_vnd"] is not None for t in mine for b in t["bookings"]
+    ), "a driver must see fares on their own trip"
+
+    theirs = client.get(
+        "/api/v1/dispatch/trips", headers=auth(world["other_driver"])
+    ).json()
+    rows = [b for t in theirs if t["id"] == str(world["trip"].id) for b in t["bookings"]]
+    assert rows, "the trip should still be visible, just without money"
+    assert all(b["price_vnd"] is None for b in rows)
+
+
+def test_dispatcher_cannot_record_a_collection(client, world):
+    r = client.post(
+        f"/api/v1/payments/{world['booking'].id}/collect",
+        headers=auth(world["dispatcher"]),
+        json={"method": "cash", "collected_amount_vnd": 150_000},
+    )
+    assert r.status_code == 403
+
+
+# --------------------------------------------------------------------
+# Return to base
+# --------------------------------------------------------------------
+
+
+def test_return_to_base_round_trip(client, db, world):
+    """Requirements §1: a car stranded in Hà Nội gets called home, and
+    the driver confirming is what moves its recorded position."""
+    vehicle, dispatcher, driver = world["vehicle"], world["dispatcher"], world["driver"]
+
+    # Strand it: finish the trip so the car is free, then put it in Hà Nội.
+    url = world["url"]
+    client.post(f"{url}/accept", headers=auth(driver))
+    client.post(f"{url}/start", headers=auth(driver))
+    client.post(f"{url}/request-completion", headers=auth(driver))
+    client.post(f"{url}/finalize", headers=auth(dispatcher))
+
+    db.expire_all()
+    assert db.get(Vehicle, vehicle.id).status is VehicleStatus.available
+
+    r = client.post(f"/api/v1/vehicles/{vehicle.id}/request-return", headers=auth(dispatcher))
+    assert r.status_code == 200
+    assert r.json()["status"] == "returning"
+    assert r.json()["return_requested_at"] is not None
+
+    # Still in Hà Nội — asking is not arriving.
+    db.expire_all()
+    assert round(to_shape(db.get(Vehicle, vehicle.id).last_location).y, 2) == round(
+        HA_NOI[0], 2
+    )
+
+    r = client.post(f"/api/v1/vehicles/{vehicle.id}/confirm-return", headers=auth(driver))
+    assert r.status_code == 200
+    assert r.json()["status"] == "available"
+    assert r.json()["return_requested_at"] is None
+    assert round(r.json()["last_location_lat"], 2) == round(BAC_GIANG[0], 2)
+
+
+def test_cannot_call_home_a_car_on_a_live_trip(client, world):
+    r = client.post(
+        f"/api/v1/vehicles/{world['vehicle'].id}/request-return",
+        headers=auth(world["dispatcher"]),
+    )
+    assert r.status_code == 409
+
+
+def test_only_the_cars_own_driver_confirms_the_return(client, db, world):
+    vehicle, dispatcher, driver = world["vehicle"], world["dispatcher"], world["driver"]
+    url = world["url"]
+    for step in ("accept", "start", "request-completion"):
+        client.post(f"{url}/{step}", headers=auth(driver))
+    client.post(f"{url}/finalize", headers=auth(dispatcher))
+    client.post(f"/api/v1/vehicles/{vehicle.id}/request-return", headers=auth(dispatcher))
+
+    assert (
+        client.post(
+            f"/api/v1/vehicles/{vehicle.id}/confirm-return",
+            headers=auth(world["other_driver"]),
+        ).status_code
+        == 403
+    )
+    assert (
+        client.post(
+            f"/api/v1/vehicles/{vehicle.id}/confirm-return", headers=auth(dispatcher)
+        ).status_code
+        == 403
+    )
+
+
+def test_a_returning_car_is_not_dispatchable(client, db, world):
+    """It is physically driving to Bắc Giang — handing it a Hà Nội
+    pickup would be a lie."""
+    from app.services.dispatch_service import _assign_vehicle
+
+    vehicle, dispatcher, driver = world["vehicle"], world["dispatcher"], world["driver"]
+    url = world["url"]
+    for step in ("accept", "start", "request-completion"):
+        client.post(f"{url}/{step}", headers=auth(driver))
+    client.post(f"{url}/finalize", headers=auth(dispatcher))
+    client.post(f"/api/v1/vehicles/{vehicle.id}/request-return", headers=auth(dispatcher))
+
+    db.expire_all()
+    probe = Trip(
+        corridor_id=world["corridor"].id,
+        direction=BookingDirection.outbound,
+        status=TripStatus.forming,
+    )
+    db.add(probe)
+    db.flush()
+    picked = _assign_vehicle(db, probe)
+    db.rollback()
+
+    assert picked is None or picked.id != vehicle.id
+
+
+def test_driver_can_find_their_own_car(client, world):
+    r = client.get("/api/v1/vehicles/mine", headers=auth(world["driver"]))
+    assert r.status_code == 200
+    assert r.json() is not None
+
+
+def test_a_driver_with_no_car_gets_null_not_an_error(client, world):
+    r = client.get("/api/v1/vehicles/mine", headers=auth(world["other_driver"]))
+    assert r.status_code == 200
+    assert r.json() is None
 
 
 def test_admin_sees_revenue_summary(client, world):

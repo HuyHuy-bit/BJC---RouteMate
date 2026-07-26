@@ -23,6 +23,12 @@ from app.services.trip_state import (
     DRIVER_ACTIVE_STATUSES,
     VEHICLE_COMMITTED_STATUSES,
 )
+from app.services.vehicle_return import (
+    ReturnError,
+    cancel_return,
+    confirm_return,
+    request_return,
+)
 
 router = APIRouter(tags=["vehicles"])
 
@@ -35,6 +41,15 @@ router = APIRouter(tags=["vehicles"])
 # and three others like it were maintained by hand, so a new state was
 # added to the enum and silently omitted from all of them.
 BLOCKING_TRIP_STATUSES = list(VEHICLE_COMMITTED_STATUSES)
+
+
+def _load_vehicle(db: Session, vehicle_id: uuid.UUID) -> Vehicle:
+    vehicle = db.get(Vehicle, vehicle_id)
+    if vehicle is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="Vehicle not found"
+        )
+    return vehicle
 
 
 def to_vehicle_out(vehicle: Vehicle) -> VehicleOut:
@@ -56,6 +71,7 @@ def to_vehicle_out(vehicle: Vehicle) -> VehicleOut:
         last_location_at=vehicle.last_location_at,
         last_location_lat=lat,
         last_location_lng=lng,
+        return_requested_at=vehicle.return_requested_at,
     )
 
 
@@ -177,6 +193,107 @@ def report_location(
 
     vehicle.last_location = WKTElement(f"POINT({payload.lng} {payload.lat})", srid=4326)
     vehicle.last_location_at = datetime.now(timezone.utc)
+    db.commit()
+    db.refresh(vehicle)
+    return to_vehicle_out(vehicle)
+
+
+@router.get("/mine", response_model=VehicleOut | None)
+def my_vehicle(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.driver)),
+):
+    """
+    The car this driver is responsible for.
+
+    Needed because a return-to-base instruction outlives the trip that
+    stranded the car: once the trip is finalized the driver has no
+    active trip to hang it off, so there would be nothing on their
+    screen telling them to drive home. Resolved via
+    Vehicle.default_driver_id, which is the only durable driver→car
+    link in the schema.
+    """
+    vehicle = (
+        db.query(Vehicle)
+        .filter(Vehicle.default_driver_id == current_user.id)
+        .order_by(Vehicle.plate_number)
+        .first()
+    )
+    return to_vehicle_out(vehicle) if vehicle is not None else None
+
+
+@router.post("/{vehicle_id}/request-return", response_model=VehicleOut)
+def request_vehicle_return(
+    vehicle_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
+):
+    """
+    Call a car back to base early — the dispatcher's move when Hà Nội
+    has no demand left and there's no reason for the car to wait there.
+    """
+    vehicle = _load_vehicle(db, vehicle_id)
+    try:
+        request_return(
+            db, vehicle, actor=current_user, reason="dispatcher called the car home"
+        )
+    except ReturnError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    db.commit()
+    db.refresh(vehicle)
+    return to_vehicle_out(vehicle)
+
+
+@router.post("/{vehicle_id}/confirm-return", response_model=VehicleOut)
+def confirm_vehicle_return(
+    vehicle_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """
+    The driver reporting they're back at base. Only that car's own
+    driver, for the same reason report_location is restricted: this
+    write moves the position dispatch trusts when choosing the next
+    car, so anyone being able to fake it makes the signal worthless.
+
+    Admins may also confirm, for the case where a driver's phone is
+    dead and someone has to record it by hand.
+    """
+    vehicle = _load_vehicle(db, vehicle_id)
+
+    is_own_driver = (
+        current_user.role is UserRole.driver
+        and vehicle.default_driver_id == current_user.id
+    )
+    if not (is_own_driver or current_user.role is UserRole.admin):
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="Chỉ tài xế của xe này (hoặc quản trị viên) mới xác nhận được",
+        )
+
+    try:
+        confirm_return(db, vehicle, actor=current_user)
+    except ReturnError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
+    db.commit()
+    db.refresh(vehicle)
+    return to_vehicle_out(vehicle)
+
+
+@router.post("/{vehicle_id}/cancel-return", response_model=VehicleOut)
+def cancel_vehicle_return(
+    vehicle_id: uuid.UUID,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
+):
+    """Call the return off — a booking turned up and the car is wanted
+    where it already is. Its position is untouched; only its
+    availability changes."""
+    vehicle = _load_vehicle(db, vehicle_id)
+    try:
+        cancel_return(db, vehicle, actor=current_user)
+    except ReturnError as exc:
+        raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=str(exc))
     db.commit()
     db.refresh(vehicle)
     return to_vehicle_out(vehicle)

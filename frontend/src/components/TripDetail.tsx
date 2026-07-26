@@ -69,12 +69,14 @@ export default function TripDetail({
     rosterDriver ??
     (selfDriver && selfDriver.id === trip.driver_id ? selfDriver : undefined);
   const vehicle = vehicles.find((v) => v.id === trip.vehicle_id);
-  // Trip-level revenue is a money rollup, so it is admin-only
-  // (requirements §3). Each passenger's own fare still shows on their
-  // row below — a dispatcher needs that to talk to a customer; they
-  // don't need the trip's takings.
+  // Admin-only. Dispatchers now receive no money at all — not the
+  // trip total and not the individual fares below, which arrive null
+  // from the server rather than being hidden here.
   const { user } = useAuth();
-  const revenue = trip.bookings.reduce((s, b) => s + b.price_vnd, 0);
+  // `?? 0` rather than a non-null assertion: this block only renders
+  // for admins, who always receive fares, but the sum must not turn
+  // into NaN if it is ever reached with a stripped payload.
+  const revenue = trip.bookings.reduce((s, b) => s + (b.price_vnd ?? 0), 0);
   const finishedAt = trip.completed_at ?? trip.cancelled_at;
 
   return (
@@ -198,7 +200,8 @@ export default function TripDetail({
                       {b.customer.full_name}
                     </p>
                     <p className="text-2xs text-faint tnum">
-                      {b.seats} chỗ · {fmtVnd(b.price_vnd)}
+                      {b.seats} chỗ
+                      {b.price_vnd !== null && ` · ${fmtVnd(b.price_vnd)}`}
                     </p>
                   </div>
                 </div>

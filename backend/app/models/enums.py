@@ -57,6 +57,12 @@ class VehicleStatus(str, enum.Enum):
     # cannot.
     assigned = "assigned"
     on_trip = "on_trip"
+    # Deadheading back to its home base with no passengers, either
+    # because a dispatcher called it home or because the operating day
+    # ended. Deliberately NOT dispatchable: the car is physically
+    # driving to Bắc Giang, so handing it a Hà Nội pickup would be a
+    # lie. A dispatcher who wants it back cancels the return first.
+    returning = "returning"
     maintenance = "maintenance"
     offline = "offline"
 
@@ -98,3 +104,9 @@ class DispatchEventType(str, enum.Enum):
     completion_requested = "completion_requested"
     completion_rejected = "completion_rejected"
     trip_finalized = "trip_finalized"
+    # Deadhead back to base — either a dispatcher calling a car home
+    # because Hà Nội has no demand left, or the end-of-day sweep.
+    # Logged so "why is this car in Bắc Giang?" is always answerable.
+    return_requested = "return_requested"
+    return_confirmed = "return_confirmed"
+    return_cancelled = "return_cancelled"

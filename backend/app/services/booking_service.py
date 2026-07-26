@@ -5,8 +5,9 @@ from sqlalchemy.orm import Session
 from app.core.pricing import price_for
 from app.models.booking import Booking
 from app.models.customer import Customer
-from app.models.enums import BookingDirection, PaymentStatus
+from app.models.enums import BookingDirection, PaymentStatus, UserRole
 from app.models.payment import Payment
+from app.models.user import User
 from app.schemas.booking import BookingCreate, BookingOut
 from app.schemas.customer import CustomerOut
 from app.schemas.payment import PaymentOut
@@ -93,9 +94,40 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
     return booking
 
 
-def to_booking_out(booking: Booking) -> BookingOut:
+def may_see_money(actor: User | None, booking: Booking) -> bool:
+    """
+    Who is entitled to this booking's fare and payment record.
+
+    Admins: everything — the financial view is theirs.
+    Drivers: their OWN trips only. They collect cash at the door, so
+             they have to know what to ask for; another driver's fares
+             are none of their business.
+    Dispatchers: nothing. Their job is operational, and the money is
+             deliberately outside it.
+
+    `actor=None` (the dispatch cycle serializing for a log) also gets
+    nothing — there is no human to be entitled.
+    """
+    if actor is None:
+        return False
+    if actor.role is UserRole.admin:
+        return True
+    if actor.role is UserRole.driver:
+        return booking.trip is not None and booking.trip.driver_id == actor.id
+    return False
+
+
+def to_booking_out(booking: Booking, actor: User | None = None) -> BookingOut:
+    """
+    Serialize a booking for `actor`.
+
+    The money fields come back null unless the caller is entitled to
+    them. Defaulting `actor` to None means a caller that forgets to
+    pass one leaks nothing — the safe direction to fail in.
+    """
     pickup_shape = to_shape(booking.pickup_point)
     dropoff_shape = to_shape(booking.dropoff_point)
+    with_money = may_see_money(actor, booking)
     return BookingOut(
         id=booking.id,
         customer=CustomerOut(
@@ -116,8 +148,12 @@ def to_booking_out(booking: Booking) -> BookingOut:
         direction=booking.direction,
         is_private=booking.is_private,
         seats=booking.seats,
-        price_vnd=booking.price_vnd,
-        payment=PaymentOut.model_validate(booking.payment) if booking.payment else None,
+        price_vnd=booking.price_vnd if with_money else None,
+        payment=(
+            PaymentOut.model_validate(booking.payment)
+            if with_money and booking.payment
+            else None
+        ),
         status=booking.status,
         trip_id=booking.trip_id,
         created_at=booking.created_at,

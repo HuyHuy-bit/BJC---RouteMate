@@ -145,3 +145,16 @@ FALLBACK_SPEED_KMH = 38.0
 
 # --- Dispatch engine ---
 DISPATCH_TICK_SECONDS = 60
+
+# --- End of the operating day ---
+# Every vehicle is based at its corridor's home hub (Bắc Giang) and is
+# stationed there overnight, whatever it was doing during the day. At
+# this LOCAL hour the end-of-day sweep sends any car that finished
+# elsewhere back to base, so the next morning's dispatch starts from
+# where the cars actually are rather than from yesterday's last dropoff.
+OPERATING_DAY_END_HOUR_LOCAL = 22
+
+# How close to its home hub a vehicle has to be to already count as "at
+# base", so the sweep and the manual call-home skip cars that are
+# already there instead of issuing pointless return instructions.
+AT_BASE_RADIUS_METERS = 3_000

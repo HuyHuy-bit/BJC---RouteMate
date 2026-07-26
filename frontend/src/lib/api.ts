@@ -1,5 +1,6 @@
 import { apiClient } from "./apiClient";
 import type {
+  AdminDashboard,
   AttentionItem,
   BookingCreate,
   BookingOut,
@@ -143,8 +144,33 @@ export const api = {
     list: () =>
       apiClient.get<NotificationOut[]>("/notifications").then((r) => r.data),
   },
+  vehicleReturn: {
+    /** Dispatcher calls a car back to base early. */
+    request: (vehicleId: string) =>
+      apiClient
+        .post<VehicleOut>(`/vehicles/${vehicleId}/request-return`)
+        .then((r) => r.data),
+    /** The driver reporting they're back — the only thing that moves
+     *  the car's recorded position home. */
+    confirm: (vehicleId: string) =>
+      apiClient
+        .post<VehicleOut>(`/vehicles/${vehicleId}/confirm-return`)
+        .then((r) => r.data),
+    cancel: (vehicleId: string) =>
+      apiClient
+        .post<VehicleOut>(`/vehicles/${vehicleId}/cancel-return`)
+        .then((r) => r.data),
+    /** The car this driver is responsible for. Survives the trip
+     *  ending, which a trip-derived lookup would not. */
+    mine: () =>
+      apiClient.get<VehicleOut | null>("/vehicles/mine").then((r) => r.data),
+  },
   admin: {
     /** Admin-only. A dispatcher's token gets a 403 here by design. */
+    dashboard: (days = 30) =>
+      apiClient
+        .get<AdminDashboard>("/admin/dashboard", { params: { days } })
+        .then((r) => r.data),
     revenueSummary: (days = 30) =>
       apiClient
         .get<RevenueSummary>("/admin/revenue-summary", { params: { days } })

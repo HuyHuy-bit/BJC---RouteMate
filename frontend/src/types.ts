@@ -23,6 +23,8 @@ export type VehicleStatus =
   | "available"
   | "assigned"
   | "on_trip"
+  /** Deadheading back to base, empty. Not dispatchable. */
+  | "returning"
   | "maintenance"
   | "offline";
 
@@ -106,11 +108,16 @@ export interface BookingOut {
   direction: BookingDirection;
   is_private: boolean;
   seats: number;
-  price_vnd: number;
   status: BookingStatus;
   trip_id: string | null;
-  payment: PaymentOut | null;
   created_at: string;
+  /**
+   * Money. Null for dispatchers — always, and enforced server-side, not
+   * by hiding it here. Admins see it everywhere; drivers see it on
+   * their own trips because they collect the cash at the door.
+   */
+  price_vnd: number | null;
+  payment: PaymentOut | null;
 }
 
 export interface TripOut {
@@ -147,6 +154,33 @@ export interface MatchingRunResult {
  * Admin-only money view. Deliberately not part of TripOut or any
  * dispatcher-facing payload — see requirements §3.
  */
+export interface DailyRevenuePoint {
+  /** Local calendar day, "YYYY-MM-DD". */
+  day: string;
+  revenue_vnd: number;
+  trips: number;
+}
+
+export interface AdminDashboard {
+  generated_at: string;
+  revenue_today_vnd: number;
+  revenue_week_vnd: number;
+  revenue_month_vnd: number;
+  revenue_total_vnd: number;
+  daily: DailyRevenuePoint[];
+  expected_vnd: number;
+  collected_vnd: number;
+  outstanding_vnd: number;
+  disputed_vnd: number;
+  waived_vnd: number;
+  trips_finalized: number;
+  passengers_carried: number;
+  seats_carried: number;
+  trips_cancelled: number;
+  avg_revenue_per_trip_vnd: number;
+  avg_seats_per_trip: number;
+}
+
 export interface RevenueSummary {
   period_start: string;
   period_end: string;
@@ -183,6 +217,8 @@ export interface VehicleOut {
   last_location_at: string | null;
   last_location_lat: number | null;
   last_location_lng: number | null;
+  /** Non-null exactly when a return to base is outstanding. */
+  return_requested_at: string | null;
 }
 
 export interface VehicleLocationPing {

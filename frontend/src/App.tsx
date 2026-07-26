@@ -15,6 +15,9 @@ const FleetPage = lazy(() => import("./pages/FleetPage"));
 const NotificationsPage = lazy(() => import("./pages/NotificationsPage"));
 const HistoryPage = lazy(() => import("./pages/HistoryPage"));
 const EmployeesPage = lazy(() => import("./pages/EmployeesPage"));
+// Admin-only, and the only screen in the app that shows money in
+// aggregate — kept out of the dispatcher bundle entirely.
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 
 function FullPageLoader() {
   return (
@@ -95,6 +98,14 @@ export default function App() {
           element={
             <ProtectedRoute allow={["admin", "dispatcher", "driver"]}>
               <HistoryPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="/business"
+          element={
+            <ProtectedRoute allow={["admin"]}>
+              <AdminDashboard />
             </ProtectedRoute>
           }
         />

@@ -28,6 +28,7 @@ EXPECTED_USER_DEPENDENTS = {
     ("trips", "driver_id"),  # cleared in users.delete_user
     ("trips", "finalized_by_user_id"),  # cleared in users.delete_user
     ("vehicles", "default_driver_id"),  # cleared in users.delete_user
+    ("vehicles", "return_requested_by_user_id"),  # cleared in users.delete_user
     ("payments", "collected_by_user_id"),  # cleared in users.delete_user
 }
 

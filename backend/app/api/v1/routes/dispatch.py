@@ -130,7 +130,7 @@ def _to_trip_out(trip: Trip, actor: User | None = None) -> TripOut:
         vehicle_id=trip.vehicle_id,
         vehicle_label=trip.vehicle_label,
         is_private=len(relevant) == 1 and relevant[0].is_private,
-        bookings=[to_booking_out(b) for b in relevant],
+        bookings=[to_booking_out(b, actor) for b in relevant],
         created_at=trip.created_at,
         completed_at=trip.completed_at,
         cancelled_at=trip.cancelled_at,
@@ -337,7 +337,7 @@ def list_attention_items(
                     minutes_overdue=overdue,
                     reason=decision.reason,
                     options=decision.options,
-                    bookings=[to_booking_out(b) for b in active],
+                    bookings=[to_booking_out(b, current_user) for b in active],
                 )
             )
 
@@ -377,7 +377,7 @@ def list_attention_items(
                 minutes_overdue=overdue,
                 reason="Sẵn sàng chạy nhưng đội xe đã kín",
                 options=None,
-                bookings=[to_booking_out(b) for b in active],
+                bookings=[to_booking_out(b, current_user) for b in active],
             )
         )
 
@@ -411,7 +411,7 @@ def list_attention_items(
                 minutes_overdue=0.0,
                 reason="Xe gặp sự cố, đang chờ xe thay thế",
                 options=None,
-                bookings=[to_booking_out(b) for b in active],
+                bookings=[to_booking_out(b, current_user) for b in active],
             )
         )
 

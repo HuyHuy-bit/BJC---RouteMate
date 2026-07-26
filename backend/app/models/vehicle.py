@@ -64,3 +64,21 @@ class Vehicle(Base, TimestampMixin):
     last_location_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), nullable=True
     )
+
+    # --- Return to base ---
+    # Every car is stationed at its corridor's home hub overnight, so a
+    # car that ends the day in Hà Nội has to get back to Bắc Giang. A
+    # dispatcher can also call one home early when Hà Nội has no demand
+    # left. Both write these; the driver confirming arrival clears them.
+    #
+    # Nullable and paired: a non-null return_requested_at is the entire
+    # definition of "a return is outstanding", so there is no way for
+    # the flag and the status to disagree about whether one exists.
+    return_requested_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True
+    )
+    # Null when the end-of-day sweep raised it rather than a person —
+    # the same "is_automatic" distinction dispatch_events already makes.
+    return_requested_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
+        ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )

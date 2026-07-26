@@ -104,6 +104,7 @@ car is the one who attests it started and finished.
 | `available` | Free and assignable, wherever it currently is | Available / Idle |
 | `assigned` | Committed to a trip that has not departed | Assigned |
 | `on_trip` | Out on the road with passengers | In Trip |
+| `returning` | Deadheading back to base, empty | — |
 | `maintenance` | Broken down or being serviced | Maintenance |
 | `offline` | Retired or otherwise out of service | Offline |
 
@@ -125,12 +126,61 @@ decision anyone makes differently.
 | `on_trip` | `available` | **Trip finalized** — location updated first |
 | `on_trip` | `available` | Trip cancelled mid-route (non-breakdown) |
 | `on_trip` | `maintenance` | Breakdown reported mid-route |
+| `available` | `returning` | Called home by a dispatcher, or by the end-of-day sweep |
+| `returning` | `available` | Driver confirms arrival at base, or the return is cancelled |
 | `maintenance` | `available` | Repaired; set manually by staff |
 | any | `offline` | Retired; set manually by admin |
 | `offline` | `available` | Returned to service; set manually by admin |
 
 A vehicle is only released if it isn't also committed to some other
 still-active trip — see `release_vehicle_if_free`.
+
+## 4a. Return to base
+
+Every vehicle is based at its corridor's **home hub** (Bắc Giang) and is
+stationed there overnight. A car that finishes its last run in Hà Nội
+has to get back, or the next morning's first booking is matched against
+yesterday's last dropoff.
+
+Home base is **derived**, never hardcoded: `Vehicle.home_corridor_id`
+→ `Corridor.home_hub_lat/lng`. The `Corridor` table exists precisely
+because these hubs were once constants in `geo.py`, which silently
+misclassified every booking on a second route.
+
+Two ways a return starts, both landing in `returning` with a
+`return_requested_at` stamp:
+
+- a **dispatcher calls the car home** early, when Hà Nội has no demand left
+- the **end-of-day sweep** (`OPERATING_DAY_END_HOUR_LOCAL`, local time)
+  sends home whatever is still out
+
+It ends one of two ways:
+
+- the **driver confirms arrival** — the only thing that moves the
+  recorded position to base
+- a **dispatcher cancels** it, usually because a booking turned up and
+  the car is wanted where it is. Position untouched.
+
+Three properties worth stating, because each rules out a specific
+inconsistency:
+
+1. **A `returning` car is not dispatchable.** It is physically driving
+   to Bắc Giang; handing it a Hà Nội pickup would be a lie. To reclaim
+   it, cancel the return first. (A `returning` car could in principle
+   still carry a Hà Nội→Bắc Giang passenger, since that is exactly
+   where it's going — real value, deliberately deferred rather than
+   half-built.)
+2. **The sweep never teleports a car.** It raises the same request a
+   dispatcher would. The business rule says cars sleep at base, but
+   the system still must not claim a car arrived until its driver says
+   so — an assumption wearing a fresh timestamp is worse than an
+   honestly stale one, because `_assign_vehicle` trusts fresh
+   timestamps and discards stale ones.
+3. **A return is refused** for a car that is mid-trip, already
+   returning, or already at base. Being at base is judged by real
+   distance (`AT_BASE_RADIUS_METERS`); an *unknown* position does not
+   count as being home, since that car is exactly the one worth asking
+   about.
 
 ## 5. Vehicle location and the finalize boundary
 

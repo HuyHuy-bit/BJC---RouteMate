@@ -21,7 +21,7 @@ from uuid import UUID, uuid4
 import pytest
 
 from app.api.v1.routes.dispatch import FINISHED_TRIP_STATUSES, _to_trip_out
-from app.models.enums import BookingStatus, TripStatus
+from app.models.enums import BookingStatus, TripStatus, UserRole
 
 
 @dataclass
@@ -90,6 +90,22 @@ def stub_geometry(monkeypatch):
     )
 
 
+@dataclass
+class FakeActor:
+    """Only `role` and `id` are read by the money-visibility rule."""
+
+    role: UserRole
+    id: UUID = field(default_factory=uuid4)
+
+
+def _admin():
+    return FakeActor(UserRole.admin)
+
+
+def _dispatcher():
+    return FakeActor(UserRole.dispatcher)
+
+
 def _trip(status, statuses_and_seats):
     return FakeTrip(
         status=status,
@@ -109,11 +125,34 @@ def test_live_trip_drops_cancelled_and_no_show_riders():
             (BookingStatus.no_show, 1),
         ],
     )
-    out = _to_trip_out(trip)
+    # Serialized for an ADMIN specifically: the inflated-revenue half of
+    # this regression is only observable to someone entitled to see
+    # fares at all. A dispatcher now gets price_vnd=None throughout —
+    # see test_dispatcher_never_sees_money below.
+    out = _to_trip_out(trip, _admin())
 
     assert len(out.bookings) == 1
     assert sum(b.seats for b in out.bookings) == 1  # not 4
     assert sum(b.price_vnd for b in out.bookings) == 150_000  # not 600,000
+
+
+def test_dispatcher_never_sees_money():
+    """
+    Requirements §2: no revenue, fare, or payment reaches a dispatcher —
+    enforced in the serializer, not by hiding fields in the UI.
+    """
+    trip = _trip(TripStatus.assigned, [(BookingStatus.locked, 1)])
+    out = _to_trip_out(trip, _dispatcher())
+    assert all(b.price_vnd is None for b in out.bookings)
+    assert all(b.payment is None for b in out.bookings)
+
+
+def test_no_actor_means_no_money():
+    """A caller that forgets to pass an actor must leak nothing — the
+    safe direction for this default to fail in."""
+    trip = _trip(TripStatus.assigned, [(BookingStatus.locked, 1)])
+    out = _to_trip_out(trip)
+    assert all(b.price_vnd is None for b in out.bookings)
 
 
 def test_finished_trip_keeps_the_full_record():

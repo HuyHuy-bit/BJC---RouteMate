@@ -5,12 +5,19 @@ import {
   ArrowUpFromLine,
   Banknote,
   Car,
+  Home,
   Phone,
   TriangleAlert,
   UserX,
 } from "lucide-react";
 import { api } from "../lib/api";
-import type { BookingOut, TripOut, TripReportIssueReason, TripStatus } from "../types";
+import type {
+  BookingOut,
+  TripOut,
+  TripReportIssueReason,
+  TripStatus,
+  VehicleOut,
+} from "../types";
 import AppShell from "../components/layout/AppShell";
 import Badge from "../components/ui/Badge";
 import Button from "../components/ui/Button";
@@ -62,6 +69,68 @@ function orderedStops(bookings: BookingOut[]): BookingOut[] {
   });
 }
 
+/**
+ * "Drive back to Bắc Giang, and tell us when you're there."
+ *
+ * Sits above the trip list because it is the driver's current job when
+ * it appears — every car is based in Bắc Giang and stays there
+ * overnight, so a car that finished its last run in Hà Nội has to come
+ * home. Confirming is what actually moves the car's recorded position:
+ * dispatch trusts that position when choosing the next car, so nothing
+ * assumes the drive happened just because it was requested.
+ */
+function ReturnToBaseCard({
+  vehicle,
+  onDone,
+  toast,
+}: {
+  vehicle: VehicleOut;
+  onDone: () => void;
+  toast: (message: string, tone?: "success" | "error") => void;
+}) {
+  const [submitting, setSubmitting] = useState(false);
+
+  const confirm = async () => {
+    setSubmitting(true);
+    try {
+      await api.vehicleReturn.confirm(vehicle.id);
+      toast("Đã xác nhận xe về Bắc Giang.", "success");
+      onDone();
+    } catch (err: any) {
+      toast(getErrorMessage(err, "Không xác nhận được."), "error");
+    } finally {
+      setSubmitting(false);
+    }
+  };
+
+  return (
+    <Card className="p-4 mb-4 border-l-2 border-l-warning">
+      <div className="flex items-start gap-2.5">
+        <Home size={16} aria-hidden="true" className="text-faint mt-0.5 shrink-0" />
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-ink">
+            Yêu cầu quay về Bắc Giang
+          </h2>
+          <p className="text-xs text-muted mt-1 leading-relaxed">
+            Điều phối đã yêu cầu đưa xe {vehicle.label ?? vehicle.plate_number} về
+            Bắc Giang. Khi đã về đến nơi, bấm xác nhận để hệ thống cập nhật vị trí xe.
+          </p>
+          <Button
+            variant="primary"
+            size="lg"
+            fullWidth
+            className="mt-3"
+            loading={submitting}
+            onClick={confirm}
+          >
+            Đã về đến Bắc Giang
+          </Button>
+        </div>
+      </div>
+    </Card>
+  );
+}
+
 export default function DriverDashboard() {
   const toast = useToast();
   const queryClient = useQueryClient();
@@ -71,9 +140,22 @@ export default function DriverDashboard() {
     queryFn: () => api.dispatch.myTrips(),
   });
 
-  const refresh = () => queryClient.invalidateQueries({ queryKey: ["my-trips"] });
+  // The car this driver is responsible for, independent of any trip.
+  // A return-to-base instruction outlives the trip that stranded the
+  // car — by the time it's issued the trip is usually finalized — so
+  // hanging it off `my-trips` would mean the driver never sees it.
+  const vehicleQuery = useQuery({
+    queryKey: ["my-vehicle"],
+    queryFn: () => api.vehicleReturn.mine(),
+  });
+
+  const refresh = () => {
+    queryClient.invalidateQueries({ queryKey: ["my-trips"] });
+    queryClient.invalidateQueries({ queryKey: ["my-vehicle"] });
+  };
 
   const tripCount = tripsQuery.data?.length ?? 0;
+  const vehicle = vehicleQuery.data ?? null;
 
   return (
     <AppShell
@@ -81,6 +163,10 @@ export default function DriverDashboard() {
       subtitle={tripCount > 0 ? `${tripCount} chuyến đang chờ bạn` : undefined}
       width="narrow"
     >
+      {vehicle?.return_requested_at && (
+        <ReturnToBaseCard vehicle={vehicle} onDone={refresh} toast={toast} />
+      )}
+
       <QueryState
         query={tripsQuery}
         errorTitle="Không tải được chuyến của bạn"
@@ -317,7 +403,13 @@ function BookingRow({
   toast: (message: string, tone?: "success" | "error") => void;
 }) {
   const [collecting, setCollecting] = useState(false);
-  const [amount, setAmount] = useState(b.payment?.expected_amount_vnd ?? b.price_vnd);
+  // A driver always receives fares for their OWN trips — which is the
+  // only place this component renders — so both sources are normally
+  // present. `?? 0` keeps the input a controlled number rather than
+  // flipping to uncontrolled if a payload ever arrives stripped.
+  const [amount, setAmount] = useState(
+    b.payment?.expected_amount_vnd ?? b.price_vnd ?? 0
+  );
   const [submitting, setSubmitting] = useState(false);
 
   const markNoShow = async () => {

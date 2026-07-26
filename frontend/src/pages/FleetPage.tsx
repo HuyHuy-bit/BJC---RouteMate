@@ -1,9 +1,9 @@
 import { useState, type FormEvent } from "react";
 import { Link } from "react-router-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, Car, Plus, Trash2 } from "lucide-react";
+import { ArrowLeft, Car, Home, MapPin, Plus, Trash2 } from "lucide-react";
 import { api } from "../lib/api";
-import { VEHICLE_STATUS } from "../lib/format";
+import { VEHICLE_STATUS, placeFromLatLng } from "../lib/format";
 import type { VehicleOut, VehicleStatus } from "../types";
 import AppShell from "../components/layout/AppShell";
 import Badge from "../components/ui/Badge";
@@ -19,6 +19,12 @@ import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 
+// `returning` is deliberately absent: it owns paired columns
+// (return_requested_at / requested_by) that only the return endpoints
+// maintain, so setting it from a plain status dropdown would produce a
+// car that is "returning" with no request behind it — exactly the
+// inconsistent state this workflow exists to avoid. Use the call-home
+// button instead.
 const STATUS_OPTIONS: VehicleStatus[] = [
   "available",
   "assigned",
@@ -52,6 +58,28 @@ export default function FleetPage() {
       refresh();
     },
     onError: () => toast("Không cập nhật được xe.", "error"),
+  });
+
+  const callHome = useMutation({
+    mutationFn: (id: string) => api.vehicleReturn.request(id),
+    onSuccess: (v) => {
+      toast(`Đã yêu cầu ${v.plate_number} quay về Bắc Giang.`, "success");
+      refresh();
+    },
+    // The server refuses a car that's busy or already home, and its
+    // message says which — surface that rather than a generic failure.
+    onError: (err: any) =>
+      toast(getErrorMessage(err, "Không gọi được xe về."), "error"),
+  });
+
+  const cancelReturn = useMutation({
+    mutationFn: (id: string) => api.vehicleReturn.cancel(id),
+    onSuccess: (v) => {
+      toast(`Đã huỷ yêu cầu quay về cho ${v.plate_number}.`, "success");
+      refresh();
+    },
+    onError: (err: any) =>
+      toast(getErrorMessage(err, "Không huỷ được yêu cầu."), "error"),
   });
 
   const assignDriver = useMutation({
@@ -150,11 +178,17 @@ export default function FleetPage() {
                   assignDriver.mutate({ id: v.id, driverId })
                 }
                 onDelete={() => setPendingDelete(v)}
+                onRequestReturn={() => callHome.mutate(v.id)}
+                onCancelReturn={() => cancelReturn.mutate(v.id)}
                 statusPending={
                   updateStatus.isPending && updateStatus.variables?.id === v.id
                 }
                 driverPending={
                   assignDriver.isPending && assignDriver.variables?.id === v.id
+                }
+                returnPending={
+                  (callHome.isPending && callHome.variables === v.id) ||
+                  (cancelReturn.isPending && cancelReturn.variables === v.id)
                 }
               />
             ))}
@@ -195,18 +229,40 @@ function VehicleRow({
   onStatusChange,
   onDriverChange,
   onDelete,
+  onRequestReturn,
+  onCancelReturn,
   statusPending = false,
   driverPending = false,
+  returnPending = false,
 }: {
   vehicle: VehicleOut;
   drivers: { id: string; full_name: string }[];
   onStatusChange: (s: VehicleStatus) => void;
   onDriverChange: (driverId: string | null) => void;
   onDelete: () => void;
+  onRequestReturn: () => void;
+  onCancelReturn: () => void;
   statusPending?: boolean;
   driverPending?: boolean;
+  returnPending?: boolean;
 }) {
   const status = VEHICLE_STATUS[vehicle.status];
+
+  const place = placeFromLatLng(
+    vehicle.last_location_lat,
+    vehicle.last_location_lng
+  );
+  const atBase = place === "bac_giang";
+  const locationLabel = place
+    ? `Đang ở ${place === "ha_noi" ? "Hà Nội" : "Bắc Giang"}`
+    : "Chưa rõ vị trí";
+
+  // Only offer to call a car home when doing so would actually be
+  // accepted: a car that's busy, already home, or of unknown position
+  // would be refused by the server anyway. Showing a button that only
+  // ever produces an error is worse than showing none.
+  const canCallHome = vehicle.status === "available" && place !== null && !atBase;
+
   return (
     <Card
       className="p-4"
@@ -237,12 +293,57 @@ function VehicleRow({
         </Button>
       </div>
 
+      {/* Where the car actually is, and whether it needs to come home.
+          Home base is Bắc Giang for every vehicle; a car that finished
+          its last run in Hà Nội has to get back before the next
+          morning, or dispatch starts the day from a stale position. */}
+      <div className="mb-3">
+        {vehicle.status === "returning" ? (
+          <div className="flex flex-wrap items-center gap-2 rounded border border-line bg-sunken px-3 py-2">
+            <Home size={14} aria-hidden="true" className="text-faint shrink-0" />
+            <span className="text-xs text-muted flex-1 min-w-0">
+              Đã yêu cầu xe quay về Bắc Giang. Chờ tài xế xác nhận đã về.
+            </span>
+            <Button
+              variant="ghost"
+              size="sm"
+              loading={returnPending}
+              onClick={onCancelReturn}
+            >
+              Huỷ yêu cầu
+            </Button>
+          </div>
+        ) : (
+          <div className="flex flex-wrap items-center gap-2">
+            <MapPin size={14} aria-hidden="true" className="text-faint shrink-0" />
+            <span className="text-xs text-muted flex-1 min-w-0">
+              {locationLabel}
+            </span>
+            {canCallHome && (
+              <Button
+                variant="secondary"
+                size="sm"
+                iconLeft={<Home size={14} aria-hidden="true" />}
+                loading={returnPending}
+                onClick={onRequestReturn}
+              >
+                Gọi xe về
+              </Button>
+            )}
+          </div>
+        )}
+      </div>
+
       <div className="grid sm:grid-cols-2 gap-3">
         <Select
           label="Trạng thái"
           accessibleName={`Trạng thái xe ${vehicle.plate_number}`}
           value={vehicle.status}
           pending={statusPending}
+          // A returning car's status isn't in the option list, so the
+          // control would silently misrepresent it. Locked while the
+          // return is outstanding; cancel it to change status.
+          disabled={vehicle.status === "returning"}
           options={STATUS_OPTIONS.map((s) => ({
             value: s,
             label: VEHICLE_STATUS[s].label,

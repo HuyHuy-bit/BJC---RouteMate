@@ -159,6 +159,12 @@ def delete_user(
     db.query(Trip).filter(Trip.finalized_by_user_id == user.id).update(
         {"finalized_by_user_id": None}
     )
+    # Who asked a car to come home must never be the reason a staff
+    # account can't be deleted. The return itself stays outstanding;
+    # only the requester's name is dropped.
+    db.query(Vehicle).filter(Vehicle.return_requested_by_user_id == user.id).update(
+        {"return_requested_by_user_id": None}
+    )
     # payments.collected_by_user_id is a real foreign key, so an older
     # collection record would otherwise block the delete outright with a
     # 500. Cleared like trips.driver_id above; the payment itself and its
