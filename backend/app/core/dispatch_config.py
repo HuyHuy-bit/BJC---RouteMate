@@ -57,7 +57,15 @@ LATE_PICKUP_TOLERANCE_MINUTES = 15
 # How long a forming pool waits for more passengers before it must decide
 # to depart or escalate.
 MAX_POOL_WAIT_MINUTES = 45
-PEAK_POOL_WAIT_MINUTES = 20
+
+# NOT IMPLEMENTED — read by nothing. Left here as a marker for intended
+# future work, NOT as a knob you can turn: changing it has no effect
+# whatsoever today, and rush hour is dispatched exactly like a quiet
+# Tuesday. Making it real needs a business decision this code can't
+# make for itself — which clock hours count as peak, and whether the
+# trigger should be time-of-day at all rather than live demand density.
+# Wire it into dispatch_engine.departure_deadline when that's decided.
+PEAK_POOL_WAIT_MINUTES = 20  # unused
 
 # --- Return-leg vehicle reuse ---
 # A vehicle finishing its outbound run is treated as a candidate for a
