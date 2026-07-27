@@ -310,9 +310,8 @@ def test_driver_keeps_the_trip_on_their_dashboard_until_signed_off(client, world
 
 
 @pytest.mark.parametrize("actor_key", ["dispatcher", "driver"])
-@pytest.mark.parametrize("path", ["/revenue-summary", "/dashboard"])
-def test_admin_endpoints_are_admin_only(client, world, actor_key, path):
-    r = client.get(f"/api/v1/admin{path}", headers=auth(world[actor_key]))
+def test_admin_dashboard_is_admin_only(client, world, actor_key):
+    r = client.get("/api/v1/admin/dashboard", headers=auth(world[actor_key]))
     assert r.status_code == 403
 
 
@@ -638,12 +637,6 @@ def test_a_driver_with_no_car_gets_null_not_an_error(client, world):
     r = client.get("/api/v1/vehicles/mine", headers=auth(world["other_driver"]))
     assert r.status_code == 200
     assert r.json() is None
-
-
-def test_admin_sees_revenue_summary(client, world):
-    r = client.get("/api/v1/admin/revenue-summary", headers=auth(world["admin"]))
-    assert r.status_code == 200
-    assert set(r.json()) >= {"expected_vnd", "collected_vnd", "trips_finalized"}
 
 
 @pytest.mark.parametrize("actor_key", ["dispatcher", "driver"])

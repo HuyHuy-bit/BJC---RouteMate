@@ -44,10 +44,6 @@ class TripAssignDriver(BaseModel):
     driver_id: uuid.UUID
 
 
-class TripStatusUpdate(BaseModel):
-    status: TripStatus
-
-
 class TripReportIssue(BaseModel):
     reason: Literal["breakdown", "accident", "driver_unavailable", "other"]
     notes: str | None = Field(default=None, max_length=500)

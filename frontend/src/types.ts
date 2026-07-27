@@ -181,19 +181,6 @@ export interface AdminDashboard {
   avg_seats_per_trip: number;
 }
 
-export interface RevenueSummary {
-  period_start: string;
-  period_end: string;
-  trips_finalized: number;
-  passengers_carried: number;
-  seats_carried: number;
-  expected_vnd: number;
-  collected_vnd: number;
-  outstanding_vnd: number;
-  disputed_vnd: number;
-  waived_vnd: number;
-}
-
 export interface GeocodeResult {
   formatted_address: string;
   lat: number;

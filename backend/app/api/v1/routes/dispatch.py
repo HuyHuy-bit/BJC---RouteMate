@@ -31,7 +31,6 @@ from app.schemas.trip import (
     TripRejectAssignment,
     TripRejectCompletion,
     TripReportIssue,
-    TripStatusUpdate,
 )
 from app.services.audit import log_pii_access
 from app.services.booking_service import to_booking_out
@@ -658,39 +657,6 @@ def assign_driver(
     # Riders were told a vehicle was coming when the trip sealed; now
     # tell them who's actually driving.
     notify_driver_assigned(db, trip, driver.full_name)
-    db.commit()
-    db.refresh(trip)
-    return _to_trip_out(trip, current_user)
-
-
-@router.patch("/trips/{trip_id}/status", response_model=TripOut)
-def update_trip_status(
-    trip_id: uuid.UUID,
-    payload: TripStatusUpdate,
-    db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
-):
-    """
-    Generic transition endpoint.
-
-    Both the permission check and the legality check now come from
-    `apply_transition` — this used to allow ANY staff member ANY
-    transition, which is how a dispatcher could start and complete a
-    trip they had never been in. The named endpoints below (accept,
-    start, request-completion, finalize) are thin wrappers over this
-    same call, so the two paths cannot enforce different rules.
-    """
-    trip = _load_trip(db, trip_id)
-
-    try:
-        apply_transition(
-            db, trip, payload.status, actor=current_user, reason="status update"
-        )
-    except TransitionError as exc:
-        raise _http_error(exc)
-
-    _apply_side_effects(db, trip, payload.status, current_user)
-
     db.commit()
     db.refresh(trip)
     return _to_trip_out(trip, current_user)

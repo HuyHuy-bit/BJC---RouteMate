@@ -11,7 +11,6 @@ import type {
   NotificationOut,
   PaymentCollect,
   PaymentOut,
-  RevenueSummary,
   TokenPair,
   TripOut,
   TripReportIssue,
@@ -101,10 +100,6 @@ export const api = {
           driver_id: driverId,
         })
         .then((r) => r.data),
-    updateStatus: (tripId: string, status: TripStatus) =>
-      apiClient
-        .patch<TripOut>(`/dispatch/trips/${tripId}/status`, { status })
-        .then((r) => r.data),
     /**
      * Named workflow actions. `path` comes from TRIP_ACTION /
      * tripActionFor in lib/format, which is itself keyed off the
@@ -170,10 +165,6 @@ export const api = {
     dashboard: (days = 30) =>
       apiClient
         .get<AdminDashboard>("/admin/dashboard", { params: { days } })
-        .then((r) => r.data),
-    revenueSummary: (days = 30) =>
-      apiClient
-        .get<RevenueSummary>("/admin/revenue-summary", { params: { days } })
         .then((r) => r.data),
   },
   payments: {
