@@ -8,7 +8,7 @@ import {
 import { MoreVertical } from "lucide-react";
 import { useDismiss } from "../../lib/useDismiss";
 
-export interface MenuItem {
+interface MenuItem {
   label: string;
   icon?: ReactNode;
   onSelect: () => void;

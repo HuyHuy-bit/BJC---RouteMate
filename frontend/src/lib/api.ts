@@ -181,10 +181,6 @@ export const api = {
       apiClient
         .post<PaymentOut>(`/payments/${bookingId}/collect`, payload)
         .then((r) => r.data),
-    adjust: (bookingId: string, payload: { status: string; notes?: string | null }) =>
-      apiClient
-        .patch<PaymentOut>(`/payments/${bookingId}`, payload)
-        .then((r) => r.data),
   },
   geocode: (address: string) =>
     apiClient

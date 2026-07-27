@@ -47,12 +47,12 @@ export interface TokenPair {
   token_type: string;
 }
 
-export interface CustomerCreate {
+interface CustomerCreate {
   full_name: string;
   phone: string;
 }
 
-export interface CustomerOut {
+interface CustomerOut {
   id: string;
   full_name: string;
   phone: string;
@@ -72,7 +72,7 @@ export interface BookingCreate {
   seats?: number;
 }
 
-export type PaymentMethod = "cash" | "bank_transfer" | "other";
+type PaymentMethod = "cash" | "bank_transfer" | "other";
 export type PaymentStatus = "pending" | "collected" | "disputed" | "waived";
 
 export interface PaymentOut {

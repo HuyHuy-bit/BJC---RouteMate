@@ -48,7 +48,7 @@ export function fmtDayLabel(iso: string): string {
  * When this trip leaves — the earliest pickup across its bookings,
  * preferring the solver's computed ETA over the customer's request.
  */
-export function tripDeparture(trip: TripOut): string | undefined {
+function tripDeparture(trip: TripOut): string | undefined {
   return trip.bookings
     .map((b) => b.estimated_pickup_at ?? b.requested_pickup_at)
     .filter(Boolean)

@@ -13,7 +13,7 @@ they're compared against must be scaled by the same factor, or
 """
 
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from uuid import uuid4
 from zoneinfo import ZoneInfo
 
@@ -30,7 +30,7 @@ from app.services.pool_insertion import (
     compute_solo_baseline,
 )
 from app.services.routing import routing_service
-from app.services.traffic import is_peak, travel_multiplier
+from app.services.traffic import travel_multiplier
 
 LOCAL = ZoneInfo(LOCAL_TIMEZONE)
 BAC_GIANG = (21.2731, 106.1946)
@@ -56,14 +56,12 @@ def test_offpeak_hours_are_unscaled():
     assert travel_multiplier(_local(9)) == 1.0
     assert travel_multiplier(_local(14)) == 1.0
     assert travel_multiplier(_local(23)) == 1.0
-    assert not is_peak(_local(14))
 
 
 def test_peak_hours_are_scaled():
     start, end = PEAK_HOURS_LOCAL[0]
     assert travel_multiplier(_local(start)) == PEAK_TRAVEL_MULTIPLIER
     assert travel_multiplier(_local(end - 1, 59)) == PEAK_TRAVEL_MULTIPLIER
-    assert is_peak(_local(start))
 
 
 def test_the_window_is_half_open_so_it_ends_cleanly():

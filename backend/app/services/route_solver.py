@@ -14,9 +14,9 @@ brute-force exactly, and branch-and-bound pruning makes it far cheaper in
 practice.
 
 `solve_pdp` is the shared core: it takes a `cost(i, j)` callback so the
-same exact search can minimize either straight-line distance (the
-`best_route` convenience wrapper) or real road-network duration (used by
-pool_insertion, passing a precomputed duration matrix). This is what
+same exact search can minimize either straight-line distance or real
+road-network duration (used by pool_insertion, passing a precomputed
+duration matrix). This is what
 lets pool_insertion drop its old raw-`itertools.permutations` search,
 which capped the number of RAW permutations inspected (40,320 at 4
 riders) below the cap before all VALID orderings (2,520) were even seen,
@@ -24,18 +24,6 @@ silently biasing results toward whoever joined the pool first.
 """
 
 from collections.abc import Callable
-from dataclasses import dataclass
-from uuid import UUID
-
-from app.services.geo import Candidate, haversine_m
-
-
-@dataclass
-class Stop:
-    booking_id: UUID
-    kind: str  # "pickup" | "dropoff"
-    lat: float
-    lng: float
 
 
 def solve_pdp(
@@ -144,52 +132,3 @@ def solve_pdp(
 
     backtrack(0.0)
     return best_cost, best_order, best_arrivals
-
-
-def _stops_for(members: list[Candidate]) -> list[Stop]:
-    stops = []
-    for m in members:
-        stops.append(Stop(m.booking_id, "pickup", m.pickup_lat, m.pickup_lng))
-        stops.append(Stop(m.booking_id, "dropoff", m.dropoff_lat, m.dropoff_lng))
-    return stops
-
-
-def best_route(members: list[Candidate]) -> tuple[float, list[Stop]]:
-    """
-    Returns (total_distance_meters, ordered_stops) for the shortest valid
-    stop sequence, using straight-line (haversine) distance. For a single
-    rider this is just their direct pickup->dropoff distance.
-
-    Thin wrapper over solve_pdp — retained as the distance-based entry
-    point and as an independently-testable reference implementation of
-    the exact search.
-    """
-    if not members:
-        return 0.0, []
-    stops = _stops_for(members)
-    if len(members) == 1:
-        m = members[0]
-        return (
-            haversine_m(m.pickup_lat, m.pickup_lng, m.dropoff_lat, m.dropoff_lng),
-            stops,
-        )
-
-    kinds = [s.kind for s in stops]
-    owners = [s.booking_id for s in stops]
-
-    def cost(i: int, j: int) -> float:
-        return haversine_m(stops[i].lat, stops[i].lng, stops[j].lat, stops[j].lng)
-
-    total, order, _arrivals = solve_pdp(kinds, owners, cost)
-    return total, [stops[i] for i in order]
-
-
-def pickup_order_ranks(ordered_stops: list[Stop]) -> dict[UUID, int]:
-    """Maps booking_id -> 1-indexed rank of when that rider gets picked up."""
-    ranks: dict[UUID, int] = {}
-    rank = 0
-    for stop in ordered_stops:
-        if stop.kind == "pickup":
-            rank += 1
-            ranks[stop.booking_id] = rank
-    return ranks

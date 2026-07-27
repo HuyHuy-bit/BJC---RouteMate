@@ -4,7 +4,7 @@ import type { Map as GoongMap, Marker as GoongMarker } from "@goongmaps/goong-js
 import "@goongmaps/goong-js/dist/goong-js.css";
 import { MAP_COLORS } from "../lib/mapColors";
 
-export interface Pin {
+interface Pin {
   lat: number;
   lng: number;
   /** Must be a literal color — Goong renders markers to a WebGL canvas,

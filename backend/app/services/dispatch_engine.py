@@ -21,7 +21,6 @@ Seal triggers, in priority order:
      loses customers.
 """
 
-import logging
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from enum import Enum
@@ -33,9 +32,6 @@ from app.core.dispatch_config import (
     MIN_POOL_SIZE_OUTBOUND,
     MIN_POOL_SIZE_RETURN,
 )
-
-logger = logging.getLogger(__name__)
-
 
 class SealDecision(str, Enum):
     SEAL = "seal"
@@ -155,31 +151,6 @@ def evaluate_pool(
             "cancel",
         ],
     )
-
-
-def run_dispatch_tick(
-    pools: list[PoolSnapshot],
-    now: datetime | None = None,
-    max_wait_minutes: int = MAX_POOL_WAIT_MINUTES,
-) -> list[DispatchDecision]:
-    """
-    One pass over every forming pool. Pure function of its inputs so it
-    can be tested without a database, and so the persistence layer stays
-    free to apply the decisions transactionally.
-    """
-    now = now or datetime.now(timezone.utc)
-    decisions = [evaluate_pool(p, now, max_wait_minutes) for p in pools]
-
-    sealed = sum(1 for d in decisions if d.decision is SealDecision.SEAL)
-    escalated = sum(1 for d in decisions if d.decision is SealDecision.ESCALATE)
-    if sealed or escalated:
-        logger.info(
-            "dispatch tick: %s pools -> %s sealed, %s escalated",
-            len(pools),
-            sealed,
-            escalated,
-        )
-    return decisions
 
 
 def rank_merge_candidates(

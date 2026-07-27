@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Check, ChevronDown, Loader2 } from "lucide-react";
 import { useDismiss } from "../../lib/useDismiss";
 
-export interface SelectOption {
+interface SelectOption {
   value: string;
   label: string;
   /** Secondary line, e.g. how many passengers a merge candidate has. */
