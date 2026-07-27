@@ -6,7 +6,6 @@ import {
   type ReactNode,
 } from "react";
 import { MoreVertical } from "lucide-react";
-import { useDismiss } from "../../lib/useDismiss";
 
 interface MenuItem {
   label: string;
@@ -46,7 +45,29 @@ export default function Menu({
     triggerRef.current?.focus();
   }, []);
 
-  useDismiss(open, rootRef, () => setOpen(false));
+  // Close on Escape and on outside pointer-down — the two ways a user
+  // says "done with this" without clicking the trigger again.
+  // pointerdown rather than click, so the menu closes before the
+  // underlying element's click handler fires; otherwise dismissing the
+  // menu by clicking a button behind it also activates that button.
+  useEffect(() => {
+    if (!open) return;
+    const onPointerDown = (e: PointerEvent) => {
+      if (!rootRef.current?.contains(e.target as Node)) setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        e.stopPropagation();
+        setOpen(false);
+      }
+    };
+    document.addEventListener("pointerdown", onPointerDown, true);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onPointerDown, true);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
 
   // Move real DOM focus with the active index so screen readers and
   // sighted keyboard users stay in agreement about where they are.
