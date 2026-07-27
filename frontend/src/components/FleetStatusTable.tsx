@@ -13,6 +13,7 @@ import {
 } from "../lib/format";
 import Badge from "./ui/Badge";
 import Card from "./ui/Card";
+import DataTable, { type Column } from "./ui/DataTable";
 import EmptyState from "./ui/EmptyState";
 
 const PLACE_SUMMARY: {
@@ -121,6 +122,55 @@ export default function FleetStatusTable({ trips }: { trips: TripOut[] }) {
     });
   }, [trips, vehiclesQuery.data, driversQuery.data]);
 
+  // The plate leads, not the nickname. "Xe 1" is what the office calls
+  // it; the plate is what a dispatcher reads out on the phone, matches
+  // against paperwork, and can identify a car by when two of them are
+  // both called "Xe". The label stays underneath so this still
+  // cross-references the trip cards, which are labelled.
+  const columns: Column<(typeof rows)[number]>[] = [
+    {
+      header: "Xe",
+      className: "whitespace-nowrap",
+      cell: (r) => (
+        <>
+          <span className="block text-sm font-medium tnum">
+            {r.vehicle.plate_number}
+          </span>
+          {r.vehicle.label && (
+            <span className="block text-2xs text-faint">{r.vehicle.label}</span>
+          )}
+        </>
+      ),
+    },
+    {
+      header: "Tài xế",
+      className: "whitespace-nowrap",
+      cell: (r) => r.driverName ?? <span className="text-faint">—</span>,
+    },
+    {
+      header: "Tuyến",
+      className: "whitespace-nowrap",
+      cell: (r) => (r.direction ? DIRECTION[r.direction].short : "—"),
+    },
+    {
+      header: "Vị trí hiện tại",
+      cell: (r) => <Badge tone={r.state.tone}>{r.state.label}</Badge>,
+    },
+    {
+      header: "Khách",
+      className: "tnum whitespace-nowrap",
+      cell: (r) => (r.trip ? `${r.seats} chỗ` : "—"),
+    },
+    {
+      header: "Đi / đến",
+      className: "tnum whitespace-nowrap text-muted",
+      cell: (r) =>
+        `${r.departsAt ? fmtTime(r.departsAt) : "—"}${
+          r.arrivesAt ? ` → ${fmtTime(r.arrivesAt)}` : ""
+        }`,
+    },
+  ];
+
   const counts = useMemo(() => {
     const c: Record<FleetPlace, number> = {
       bac_giang: 0,
@@ -161,76 +211,12 @@ export default function FleetStatusTable({ trips }: { trips: TripOut[] }) {
           description="Thêm xe ở trang Đội xe để bắt đầu điều phối."
         />
       ) : (
-        // Wide table scrolls inside its own container so the page body
-        // never scrolls sideways on a narrow screen.
-        <div className="overflow-x-auto">
-          <table className="w-full text-left border-collapse min-w-[640px]">
-            <thead>
-              <tr className="text-2xs text-faint">
-                <th scope="col" className="font-medium px-4 py-2">
-                  Xe
-                </th>
-                <th scope="col" className="font-medium px-4 py-2">
-                  Tài xế
-                </th>
-                <th scope="col" className="font-medium px-4 py-2">
-                  Tuyến
-                </th>
-                <th scope="col" className="font-medium px-4 py-2">
-                  Vị trí hiện tại
-                </th>
-                <th scope="col" className="font-medium px-4 py-2">
-                  Khách
-                </th>
-                <th scope="col" className="font-medium px-4 py-2 whitespace-nowrap">
-                  Đi / đến
-                </th>
-              </tr>
-            </thead>
-            <tbody>
-              {rows.map((r) => (
-                <tr
-                  key={r.vehicle.id}
-                  className="border-t border-line hover:bg-sunken transition-colors"
-                >
-                  {/* The plate leads, not the nickname. "Xe 1" is what
-                      the office calls it; the plate is what a
-                      dispatcher reads out on the phone, matches against
-                      paperwork, and can identify a car by when two of
-                      them are both called "Xe". The label stays
-                      underneath so this still cross-references the trip
-                      cards, which are labelled. */}
-                  <td className="px-4 py-2.5 whitespace-nowrap">
-                    <span className="block text-sm font-medium tnum">
-                      {r.vehicle.plate_number}
-                    </span>
-                    {r.vehicle.label && (
-                      <span className="block text-2xs text-faint">
-                        {r.vehicle.label}
-                      </span>
-                    )}
-                  </td>
-                  <td className="px-4 py-2.5 text-sm whitespace-nowrap">
-                    {r.driverName ?? <span className="text-faint">—</span>}
-                  </td>
-                  <td className="px-4 py-2.5 text-sm whitespace-nowrap">
-                    {r.direction ? DIRECTION[r.direction].short : "—"}
-                  </td>
-                  <td className="px-4 py-2.5">
-                    <Badge tone={r.state.tone}>{r.state.label}</Badge>
-                  </td>
-                  <td className="px-4 py-2.5 text-sm tnum whitespace-nowrap">
-                    {r.trip ? `${r.seats} chỗ` : "—"}
-                  </td>
-                  <td className="px-4 py-2.5 text-sm tnum whitespace-nowrap text-muted">
-                    {r.departsAt ? fmtTime(r.departsAt) : "—"}
-                    {r.arrivesAt ? ` → ${fmtTime(r.arrivesAt)}` : ""}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <DataTable
+          columns={columns}
+          rows={rows}
+          rowKey={(r) => r.vehicle.id}
+          caption="Trạng thái từng xe trong đội"
+        />
       )}
     </Card>
   );
