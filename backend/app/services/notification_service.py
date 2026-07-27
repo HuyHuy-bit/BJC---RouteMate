@@ -1,16 +1,19 @@
 """
 Composes customer-facing messages.
 
-WHAT to say lives here; HOW it reaches the customer lives in
-messaging.py. Today that means every message is stored and surfaced to
-staff (see /api/v1/notifications) to relay by phone, because this
-business has no Zalo Official Account yet — but no caller here knows or
-cares which channel is in use, so connecting a real one later changes
-nothing in this file.
+Nothing is transmitted. Every message is stored and surfaced to staff
+(see /api/v1/notifications), who phone or Zalo the customer themselves —
+which is how this business already works, since customers book by phone
+in the first place. There is no Zalo Official Account registered, and
+registering one is an admin step, not a coding one.
 
-Each message records the channel and status it actually got, rather
-than a hardcoded assumption, so the moment a real channel exists this
-table becomes a genuine delivery log instead of a manual-relay queue.
+`pending_manual_relay` is the honest status for that. Reporting a
+message as "sent" when nothing was sent is the one thing this module
+must never do: staff would trust the screen and stop calling.
+
+To connect Zalo later: register an OA, put the token in the env, and
+send from _queue below before the row is written, recording the real
+channel and status on the row instead of the two constants.
 """
 
 from collections.abc import Callable
@@ -21,7 +24,6 @@ from sqlalchemy.orm import Session
 from app.models.booking import Booking
 from app.models.notification import Notification
 from app.models.trip import Trip
-from app.services.messaging import deliver
 
 
 def _fmt_time(dt) -> str:
@@ -36,19 +38,18 @@ def _queue(
     message: str,
 ) -> Notification:
     """
-    Hand one composed message to the delivery layer and record what
-    actually happened to it. Single choke point on purpose — five
-    notify_* functions used to construct this row themselves, so a
-    change to how delivery is tracked meant editing all five.
+    Store one composed message for staff to relay. Single choke point on
+    purpose — five notify_* functions used to construct this row
+    themselves, so a change to how delivery is tracked meant editing all
+    five.
     """
-    result = deliver(phone=booking.customer.phone, message=message)
     note = Notification(
         booking_id=booking.id,
         trip_id=trip_id,
         event=event,
         message=message,
-        channel=result.channel,
-        status=result.status,
+        channel="manual",
+        status="pending_manual_relay",
     )
     db.add(note)
     return note

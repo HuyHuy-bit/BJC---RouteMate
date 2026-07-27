@@ -41,6 +41,7 @@ from app.core.dispatch_config import (
     AT_BASE_RADIUS_METERS,
     IDLE_AWAY_RETURN_MINUTES,
 )
+from app.core.timeutil import as_utc
 from app.models.corridor import Corridor
 from app.models.enums import DispatchEventType, VehicleStatus
 from app.models.trip import Trip
@@ -251,10 +252,7 @@ def idle_away_from_base(db: Session, minutes: int) -> list[tuple[Vehicle, float]
             continue
         if is_at_base(db, vehicle):
             continue
-        since = vehicle.last_location_at
-        if since.tzinfo is None:
-            since = since.replace(tzinfo=timezone.utc)
-        idle_minutes = (now - since).total_seconds() / 60
+        idle_minutes = (now - as_utc(vehicle.last_location_at)).total_seconds() / 60
         if idle_minutes >= minutes:
             idle.append((vehicle, idle_minutes))
 

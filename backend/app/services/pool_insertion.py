@@ -36,6 +36,7 @@ from app.core.dispatch_config import (
     WEIGHT_PICKUP_WAIT,
     WEIGHT_WORST_DETOUR,
 )
+from app.core.timeutil import as_utc
 from app.services.geo import haversine_m
 from app.services.route_solver import solve_pdp
 from app.services.traffic import travel_multiplier
@@ -86,23 +87,6 @@ class InsertionResult:
 
 
 
-def _as_utc(dt: datetime) -> datetime:
-    """
-    Normalizes any datetime to timezone-aware UTC.
-
-    Postgres `timestamptz` columns can come back either aware or naive
-    depending on driver and session settings, and mixing the two raises
-    `TypeError: can't subtract offset-naive and offset-aware datetimes`
-    the moment a stored booking is compared against a fresh
-    `datetime.now(timezone.utc)`. Normalizing at every boundary is the
-    only reliable fix — every comparison in this module goes through
-    here first.
-    """
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
-
-
 def compute_solo_baseline(pickup: Coord, dropoff: Coord) -> float:
     """
     A booking's direct point-to-point ride time, in seconds.
@@ -123,7 +107,7 @@ def compute_solo_baseline(pickup: Coord, dropoff: Coord) -> float:
 
 def _windows_overlap(a: datetime, b: datetime) -> bool:
     return abs(
-        (_as_utc(a) - _as_utc(b)).total_seconds()
+        (as_utc(a) - as_utc(b)).total_seconds()
     ) <= PICKUP_WINDOW_MINUTES * 60
 
 
@@ -245,7 +229,7 @@ def _best_ordering(
         ) -> tuple[bool, float]:
             stop = stops[stop_index]
             if stop.kind == "pickup":
-                requested = _as_utc(member_by_id[stop.booking_id].requested_pickup_at)
+                requested = as_utc(member_by_id[stop.booking_id].requested_pickup_at)
                 arrival_at = trip_start + timedelta(seconds=arrival_seconds)
                 if arrival_at > requested + late:
                     return False, 0.0  # would arrive too late — reject this route
@@ -313,7 +297,7 @@ def best_ordering_from_position(
     # to the deadhead leg too — driving out to the first pickup is no
     # faster in traffic than the rest of the run.
     slowdown = travel_multiplier(
-        min(_as_utc(m.requested_pickup_at) for m in members)
+        min(as_utc(m.requested_pickup_at) for m in members)
     )
 
     def cost(i: int, j: int) -> float:
@@ -411,7 +395,7 @@ def evaluate_insertion(
     this evaluation free of routing API calls; omitting it fetches as
     before.
     """
-    now = _as_utc(now or datetime.now(timezone.utc))
+    now = as_utc(now or datetime.now(timezone.utc))
 
     # ---- Stage 1: free rejects -------------------------------------
     # Seats, not member count — one booking can be a family of three.
@@ -453,7 +437,7 @@ def evaluate_insertion(
     # to whoever in this candidate route has been waiting longest,
     # same convention used everywhere else a pool's start time matters
     # (departure_deadline, _write_etas).
-    trip_start = min(_as_utc(m.requested_pickup_at) for m in everyone)
+    trip_start = min(as_utc(m.requested_pickup_at) for m in everyone)
 
     # ---- Stage 3: exact ordering, pruned by schedule window AND detour -
     # Both the pickup-time promise and the per-passenger detour cap are
@@ -531,7 +515,7 @@ def evaluate_insertion(
     wait_term = min(1.0, max(0.0, max_disturbance_seconds) / (PICKUP_WINDOW_MINUTES * 60))
 
     if departure_deadline:
-        remaining = (_as_utc(departure_deadline) - now).total_seconds()
+        remaining = (as_utc(departure_deadline) - now).total_seconds()
         # Closer to deadline == more urgent to fill == better score.
         deadline_term = max(0.0, min(1.0, remaining / (PICKUP_WINDOW_MINUTES * 60)))
     else:
@@ -591,7 +575,7 @@ def solve_group_ordering(
         # here), so missing it made the whole feature invisible in
         # practice.
         m = members[0]
-        slowdown = travel_multiplier(_as_utc(m.requested_pickup_at))
+        slowdown = travel_multiplier(as_utc(m.requested_pickup_at))
         duration = routing_service.leg(m.pickup, m.dropoff).duration_seconds * slowdown
         stops = [Stop(m.booking_id, "pickup", m.pickup), Stop(m.booking_id, "dropoff", m.dropoff)]
         offsets = {m.booking_id: {"pickup": 0.0, "dropoff": duration}}
@@ -605,5 +589,5 @@ def solve_group_ordering(
         index[(m.booking_id, "dropoff")] = len(coords)
         coords.append(m.dropoff)
     durations = _leg_lookup(coords)
-    trip_start = min(_as_utc(m.requested_pickup_at) for m in members)
+    trip_start = min(as_utc(m.requested_pickup_at) for m in members)
     return _best_ordering(members, durations, index, trip_start)

@@ -16,9 +16,9 @@ from app.core.dispatch_config import (
     EARLY_PICKUP_TOLERANCE_MINUTES,
     LATE_PICKUP_TOLERANCE_MINUTES,
 )
+from app.core.timeutil import as_utc
 from app.services.pool_insertion import (
     PoolMember,
-    _as_utc,
     _best_ordering,
     _marginal_disturbance_seconds,
 )
@@ -109,7 +109,7 @@ def test_ordering_scheduling_a_pickup_too_late_is_rejected():
     sequence = [(a, "pickup"), (a, "dropoff"), (b, "pickup"), (b, "dropoff")]
     late_seconds = (LATE_PICKUP_TOLERANCE_MINUTES + 20) * 60
     durations = _biased_durations(index, sequence, [10, late_seconds, 10])
-    trip_start = min(_as_utc(m.requested_pickup_at) for m in members)
+    trip_start = min(as_utc(m.requested_pickup_at) for m in members)
 
     total, order, offsets = _best_ordering(members, durations, index, trip_start)
 
@@ -133,7 +133,7 @@ def test_early_arrival_forces_a_wait_that_delays_later_stops():
     sequence = [(a, "pickup"), (b, "pickup"), (a, "dropoff"), (b, "dropoff")]
     # a->b pickup leg is short (arrives way before B's window) on purpose.
     durations = _biased_durations(index, sequence, [60, 120, 60])
-    trip_start = min(_as_utc(m.requested_pickup_at) for m in members)
+    trip_start = min(as_utc(m.requested_pickup_at) for m in members)
 
     total, order, offsets = _best_ordering(members, durations, index, trip_start)
 
@@ -243,5 +243,5 @@ def test_as_utc_makes_naive_and_aware_subtractable():
     aware = datetime(2026, 7, 25, 7, 30, tzinfo=timezone.utc)
     # This is exactly the subtraction find_returning_vehicle does; before
     # the fix, one side naive + one aware raised TypeError.
-    gap = (_as_utc(naive) - _as_utc(aware)).total_seconds() / 60
+    gap = (as_utc(naive) - as_utc(aware)).total_seconds() / 60
     assert gap == 30

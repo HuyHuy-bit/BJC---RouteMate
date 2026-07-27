@@ -22,17 +22,10 @@ detour cap, MAX_PASSENGERS) the rest of the system already relies on —
 this module decides ORDER, not what counts as feasible.
 """
 
-from datetime import datetime, timezone
-
 from app.core.dispatch_config import MAX_PASSENGERS, TIME_CLUSTER_MINUTES
+from app.core.timeutil import as_utc
 from app.services.geo import haversine_m, project_onto_corridor
 from app.services.pool_insertion import LegCache, PoolMember, evaluate_insertion
-
-
-def _as_utc(dt: datetime) -> datetime:
-    if dt.tzinfo is None:
-        return dt.replace(tzinfo=timezone.utc)
-    return dt.astimezone(timezone.utc)
 
 
 def corridor_position_meters(lat: float, lng: float, corridor) -> float:
@@ -70,12 +63,12 @@ def time_cluster(
     if not members:
         return []
 
-    ordered = sorted(members, key=lambda m: _as_utc(m.requested_pickup_at))
+    ordered = sorted(members, key=lambda m: as_utc(m.requested_pickup_at))
     clusters: list[list[PoolMember]] = [[ordered[0]]]
 
     for prev, curr in zip(ordered, ordered[1:]):
         gap_minutes = (
-            _as_utc(curr.requested_pickup_at) - _as_utc(prev.requested_pickup_at)
+            as_utc(curr.requested_pickup_at) - as_utc(prev.requested_pickup_at)
         ).total_seconds() / 60
         if gap_minutes > threshold_minutes:
             clusters.append([curr])
@@ -109,7 +102,7 @@ def cluster_by_proximity(
     one covering the whole group and this entire clustering pass costs
     zero routing API calls.
     """
-    remaining = sorted(members, key=lambda m: _as_utc(m.requested_pickup_at))
+    remaining = sorted(members, key=lambda m: as_utc(m.requested_pickup_at))
     groups: list[list[PoolMember]] = []
 
     def separation(a: PoolMember, b: PoolMember) -> float:

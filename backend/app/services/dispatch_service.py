@@ -24,6 +24,7 @@ from app.core.dispatch_config import (
     RETURN_VEHICLE_MATCH_WINDOW_MINUTES,
     VEHICLE_LOCATION_STALE_MINUTES,
 )
+from app.core.timeutil import as_utc
 from app.models.booking import Booking
 from app.models.corridor import Corridor
 from app.models.dispatch_event import DispatchEvent
@@ -48,16 +49,13 @@ from app.services.vehicle_return import send_idle_vehicles_home
 from app.services.dispatch_engine import (
     PoolSnapshot,
     SealDecision,
-    departure_deadline,
     evaluate_pool,
     rank_merge_candidates,
 )
 from app.services.pool_insertion import (
     PoolMember,
-    _as_utc,
     best_ordering_from_position,
     build_leg_cache,
-    compute_solo_baseline,
     evaluate_insertion,
     solve_group_ordering,
 )
@@ -221,7 +219,7 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
             stale_cutoff = datetime.now(timezone.utc) - timedelta(
                 minutes=VEHICLE_LOCATION_STALE_MINUTES
             )
-            if _as_utc(vehicle.last_location_at) >= stale_cutoff:
+            if as_utc(vehicle.last_location_at) >= stale_cutoff:
                 pos = to_shape(vehicle.last_location)
                 vehicle_position = (pos.y, pos.x)
 
@@ -235,7 +233,7 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
             m.booking_id: {
                 "pickup": 0.0,
                 "dropoff": route.total_duration_seconds
-                * travel_multiplier(_as_utc(m.requested_pickup_at)),
+                * travel_multiplier(as_utc(m.requested_pickup_at)),
             }
         }
     elif vehicle_position is not None:
@@ -465,7 +463,7 @@ def find_returning_vehicle(db: Session, booking: Booking) -> Vehicle | None:
         # Postgres with differing tzinfo, and mixing naive/aware raises
         # TypeError mid-cycle.
         gap_minutes = (
-            _as_utc(booking.requested_pickup_at) - _as_utc(estimated_arrival)
+            as_utc(booking.requested_pickup_at) - as_utc(estimated_arrival)
         ).total_seconds() / 60
 
         too_late = gap_minutes < -RETURN_VEHICLE_LATE_TOLERANCE_MINUTES

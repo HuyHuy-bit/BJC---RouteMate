@@ -21,7 +21,7 @@ subtraction has to stay honest). Scaling both means a 10-minute detour
 in traffic correctly reads as ~13 minutes rather than staying 10.
 """
 
-from datetime import datetime, timezone
+from datetime import datetime
 from zoneinfo import ZoneInfo
 
 from app.core.dispatch_config import (
@@ -29,6 +29,7 @@ from app.core.dispatch_config import (
     PEAK_HOURS_LOCAL,
     PEAK_TRAVEL_MULTIPLIER,
 )
+from app.core.timeutil import as_utc
 
 _LOCAL_TZ = ZoneInfo(LOCAL_TIMEZONE)
 
@@ -51,14 +52,8 @@ def travel_multiplier(at: datetime | None) -> float:
     """
     if at is None:
         return 1.0
-    aware = at if at.tzinfo is not None else at.replace(tzinfo=timezone.utc)
-    hour = aware.astimezone(_LOCAL_TZ).hour
+    hour = as_utc(at).astimezone(_LOCAL_TZ).hour
     for start_hour, end_hour in PEAK_HOURS_LOCAL:
         if start_hour <= hour < end_hour:
             return PEAK_TRAVEL_MULTIPLIER
     return 1.0
-
-
-def is_peak(at: datetime | None) -> bool:
-    """Whether `at` falls in a rush-hour window (local time)."""
-    return travel_multiplier(at) > 1.0
