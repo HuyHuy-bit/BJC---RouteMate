@@ -55,7 +55,7 @@ export default function RevenueChart({
       0
     );
 
-    return { max, top, x, y, line, area, peakIndex, innerW };
+    return { top, x, y, line, area, peakIndex, innerW };
   }, [points]);
 
   if (!model) {
@@ -68,14 +68,12 @@ export default function RevenueChart({
 
   const { top, x, y, line, area, peakIndex, innerW } = model;
   const active = hover !== null ? points[hover] : null;
-  const axis = axisLabels(points[0].day, points[points.length - 1].day);
 
   return (
     <div>
       <div className="relative">
-        {/* Its own positioning context, sized to the plot only — the
-            markers below are placed as a percentage of THIS box, and
-            the outer div also holds the axis labels and tooltip. */}
+        {/* Positioning box for the markers — plot height only, the
+            labels and tooltip sit outside it. */}
         <div className="relative h-44">
         <svg
           viewBox={`0 0 ${innerW} ${H}`}
@@ -150,17 +148,12 @@ export default function RevenueChart({
 
         </svg>
 
-        {/* Markers are HTML, not SVG.
-            `preserveAspectRatio="none"` is what lets the line stretch to
-            any container width, but it stretches everything drawn inside
-            it — an SVG <circle> came out as a flat orange ellipse.
-            A line distorted along x is still an honest picture of the
-            data; a dot is not, it just looks broken. Positioning these
-            in percentages keeps them round at every width. */}
+        {/* Markers are HTML, not SVG: preserveAspectRatio="none" turns an
+            SVG <circle> into an ellipse. %-positioned HTML stays round. */}
         {[peakIndex, ...(hover !== null && hover !== peakIndex ? [hover] : [])].map(
-          (i, n) => (
+          (i) => (
             <span
-              key={`${i}-${n}`}
+              key={i}
               aria-hidden="true"
               className="absolute w-2 h-2 rounded-full bg-brand ring-2 ring-surface -translate-x-1/2 -translate-y-1/2 pointer-events-none"
               style={{
@@ -178,9 +171,9 @@ export default function RevenueChart({
             rounded-up number that appears nowhere in the data, so
             printing it invited reading it as a real figure. */}
         <div className="flex justify-between text-2xs text-faint tnum mt-1">
-          <span>{axis.start}</span>
+          <span>{fmtDay(points[0].day)}</span>
           <span>Cao nhất {fmtVnd(points[peakIndex].revenue_vnd)}</span>
-          <span>{axis.end}</span>
+          <span>{fmtDay(points[points.length - 1].day)}</span>
         </div>
 
         {active && (
@@ -239,19 +232,4 @@ export default function RevenueChart({
 function fmtDay(iso: string): string {
   const [, m, d] = iso.split("-");
   return `${d}/${m}`;
-}
-
-/**
- * The two ends of the x-axis, saying the month only when it changes.
- *
- * "26/07 … 27/07" repeats a month the reader already has; within one
- * month the second number is the only new information. Across a month
- * boundary both are spelled out, because then it genuinely differs.
- */
-function axisLabels(first: string, last: string): { start: string; end: string } {
-  const [, fm] = first.split("-");
-  const [, lm] = last.split("-");
-  return fm === lm
-    ? { start: first.split("-")[2], end: fmtDay(last) }
-    : { start: fmtDay(first), end: fmtDay(last) };
 }
