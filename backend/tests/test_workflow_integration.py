@@ -370,6 +370,47 @@ def test_dispatcher_cannot_record_a_collection(client, world):
     assert r.status_code == 403
 
 
+def test_dispatcher_and_admin_see_customer_contact_on_bookings_and_trips(client, world):
+    """DATA_PROTECTION.md §4: dispatchers need contact info to
+    coordinate pickups, so it must survive the redaction that protects
+    it from other drivers."""
+    for actor_key in ("dispatcher", "admin"):
+        actor = world[actor_key]
+        rows = client.get("/api/v1/bookings", headers=auth(actor)).json()
+        mine = next(b for b in rows if b["id"] == str(world["booking"].id))
+        assert mine["customer"]["phone"] == world["customer"].phone
+
+        trips = client.get("/api/v1/dispatch/trips", headers=auth(actor)).json()
+        trip = next(t for t in trips if t["id"] == str(world["trip"].id))
+        assert trip["bookings"][0]["customer"]["phone"] == world["customer"].phone
+
+
+def test_driver_contact_redacted_on_other_drivers_trip(client, world):
+    """The same boundary as fares (test_driver_sees_fares_only_on_their_own_trips),
+    now covering the customer's name and phone number too."""
+    theirs = client.get(
+        "/api/v1/dispatch/trips", headers=auth(world["other_driver"])
+    ).json()
+    rows = [b for t in theirs if t["id"] == str(world["trip"].id) for b in t["bookings"]]
+    assert rows, "the trip should still be visible, just without contact info"
+    assert all(b["customer"]["phone"] is None for b in rows)
+    assert all(b["customer"]["full_name"] is None for b in rows)
+
+    listed = client.get("/api/v1/bookings", headers=auth(world["other_driver"])).json()
+    mine = next(b for b in listed if b["id"] == str(world["booking"].id))
+    assert mine["customer"]["phone"] is None
+    assert mine["customer"]["full_name"] is None
+
+
+def test_driver_sees_contact_on_their_own_trip(client, world):
+    """A driver needs the rider's phone number to call ahead — the tap-
+    to-call button in DriverDashboard depends on this."""
+    mine = client.get("/api/v1/dispatch/my-trips", headers=auth(world["driver"])).json()
+    booking = next(b for t in mine for b in t["bookings"])
+    assert booking["customer"]["phone"] == world["customer"].phone
+    assert booking["customer"]["full_name"] == world["customer"].full_name
+
+
 # --------------------------------------------------------------------
 # Return to base
 # --------------------------------------------------------------------

@@ -33,7 +33,7 @@ from app.schemas.trip import (
     TripReportIssue,
 )
 from app.services.audit import log_pii_access
-from app.services.booking_service import to_booking_out
+from app.services.booking_service import may_see_customer_contact, to_booking_out
 from app.services.dispatch_engine import SealDecision, evaluate_pool
 from app.services.dispatch_service import (
     extend_pool_wait,
@@ -218,6 +218,17 @@ def list_trips(
         .order_by(Trip.created_at.desc())
         .all()
     )
+    for trip in trips:
+        for booking in trip.bookings:
+            if may_see_customer_contact(current_user, booking):
+                log_pii_access(
+                    db,
+                    actor_user_id=current_user.id,
+                    action="read_trip_customer",
+                    target_type="customer",
+                    target_id=booking.customer_id,
+                )
+    db.commit()
     return [_to_trip_out(t, current_user) for t in trips]
 
 
@@ -235,6 +246,17 @@ def my_trips(
         .order_by(Trip.created_at.asc())
         .all()
     )
+    for trip in trips:
+        for booking in trip.bookings:
+            if may_see_customer_contact(current_user, booking):
+                log_pii_access(
+                    db,
+                    actor_user_id=current_user.id,
+                    action="read_trip_customer",
+                    target_type="customer",
+                    target_id=booking.customer_id,
+                )
+    db.commit()
     return [_to_trip_out(t, current_user) for t in trips]
 
 

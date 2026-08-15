@@ -11,6 +11,11 @@ class CustomerCreate(BaseModel):
 
 class CustomerOut(BaseModel):
     id: uuid.UUID
-    full_name: str
-    phone: str
+    # Optional, not required: null when the caller isn't entitled to
+    # this booking's customer contact info — see
+    # booking_service.may_see_customer_contact. Callers reaching a
+    # customer directly via /customers (staff-only, see
+    # routes/customers.py) always get real values.
+    full_name: str | None
+    phone: str | None
     created_at: datetime

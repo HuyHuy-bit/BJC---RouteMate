@@ -117,23 +117,48 @@ def may_see_money(actor: User | None, booking: Booking) -> bool:
     return False
 
 
+def may_see_customer_contact(actor: User | None, booking: Booking) -> bool:
+    """
+    Who is entitled to this booking's customer's name and phone number.
+
+    Admins and dispatchers: always — dispatchers quote prices and
+    coordinate pickups, so they need to be able to reach the customer
+    (see docs/DATA_PROTECTION.md principle 4: "Dispatchers see what
+    they need to do matching").
+    Drivers: their OWN trips only, the same boundary as may_see_money —
+    they need to call the rider they are about to pick up, not browse
+    the whole customer base through booking or trip listings.
+
+    `actor=None` gets nothing — there is no human to be entitled.
+    """
+    if actor is None:
+        return False
+    if actor.role in (UserRole.admin, UserRole.dispatcher):
+        return True
+    if actor.role is UserRole.driver:
+        return booking.trip is not None and booking.trip.driver_id == actor.id
+    return False
+
+
 def to_booking_out(booking: Booking, actor: User | None = None) -> BookingOut:
     """
     Serialize a booking for `actor`.
 
-    The money fields come back null unless the caller is entitled to
-    them. Defaulting `actor` to None means a caller that forgets to
-    pass one leaks nothing — the safe direction to fail in.
+    The money and customer-contact fields come back null unless the
+    caller is entitled to them. Defaulting `actor` to None means a
+    caller that forgets to pass one leaks nothing — the safe direction
+    to fail in.
     """
     pickup_shape = to_shape(booking.pickup_point)
     dropoff_shape = to_shape(booking.dropoff_point)
     with_money = may_see_money(actor, booking)
+    with_contact = may_see_customer_contact(actor, booking)
     return BookingOut(
         id=booking.id,
         customer=CustomerOut(
             id=booking.customer.id,
-            full_name=booking.customer.full_name,
-            phone=booking.customer.phone,
+            full_name=booking.customer.full_name if with_contact else None,
+            phone=booking.customer.phone if with_contact else None,
             created_at=booking.customer.created_at,
         ),
         pickup_address=booking.pickup_address,
