@@ -25,6 +25,7 @@ docker-compose.override.yml
 
 # claude code local state (worktrees, local settings)
 .claude/
+docs/superpowers/
 
 # os
 .DS_Store
