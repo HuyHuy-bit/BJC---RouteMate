@@ -503,6 +503,37 @@ def test_deleting_a_customer_does_not_strand_their_cars_vehicle(client, db, worl
     assert gone is None, "the emptied trip should be gone"
 
 
+# --------------------------------------------------------------------
+# Customer PII access boundary
+# --------------------------------------------------------------------
+
+
+def test_driver_cannot_list_customers(client, world):
+    r = client.get("/api/v1/customers", headers=auth(world["driver"]))
+    assert r.status_code == 403
+
+
+def test_driver_cannot_read_a_customer_by_id(client, world):
+    r = client.get(
+        f"/api/v1/customers/{world['customer'].id}", headers=auth(world["driver"])
+    )
+    assert r.status_code == 403
+
+
+@pytest.mark.parametrize("actor_key", ["dispatcher", "admin"])
+def test_staff_can_still_list_and_read_customers(client, world, actor_key):
+    actor = world[actor_key]
+    listed = client.get("/api/v1/customers", headers=auth(actor))
+    assert listed.status_code == 200
+    assert any(c["id"] == str(world["customer"].id) for c in listed.json())
+
+    single = client.get(
+        f"/api/v1/customers/{world['customer'].id}", headers=auth(actor)
+    )
+    assert single.status_code == 200
+    assert single.json()["phone"] == world["customer"].phone
+
+
 def test_nearest_car_wins_even_when_its_position_is_hours_old(db, world):
     """
     Regression, reported from real use: a car in Hà Nội kept being

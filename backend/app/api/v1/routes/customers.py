@@ -3,7 +3,7 @@ import uuid
 from fastapi import APIRouter, Depends, HTTPException, status
 from sqlalchemy.orm import Session
 
-from app.api.deps import get_current_user, require_role
+from app.api.deps import require_role
 from app.db.session import get_db
 from app.models.booking import Booking
 from app.models.customer import Customer
@@ -23,7 +23,7 @@ router = APIRouter(tags=["customers"])
 def get_customer(
     customer_id: uuid.UUID,
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
 ):
     customer = db.get(Customer, customer_id)
     if customer is None:
@@ -51,7 +51,7 @@ def get_customer(
 @router.get("", response_model=list[CustomerOut])
 def list_customers(
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
 ):
     customers = db.query(Customer).order_by(Customer.created_at.desc()).all()
     for c in customers:
