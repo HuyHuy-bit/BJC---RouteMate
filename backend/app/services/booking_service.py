@@ -1,3 +1,5 @@
+import logging
+
 from geoalchemy2.elements import WKTElement
 from geoalchemy2.shape import to_shape
 from sqlalchemy.orm import Session
@@ -11,9 +13,11 @@ from app.models.user import User
 from app.schemas.booking import BookingCreate, BookingOut
 from app.schemas.customer import CustomerOut
 from app.schemas.payment import PaymentOut
-from app.services.corridors import find_corridor_for_points
+from app.services.corridors import corridor_miss_report, find_corridor_for_points
 from app.services.geo import classify_direction
 from app.services.routing import routing_service
+
+logger = logging.getLogger(__name__)
 
 
 class OutsideServiceAreaError(Exception):
@@ -37,6 +41,19 @@ def create_booking(db: Session, customer: Customer, payload: BookingCreate) -> B
         payload.dropoff_lng,
     )
     if corridor is None:
+        # Logged, not just rejected: a turned-away booking is the only
+        # evidence that a service-area tolerance might be wrong, and
+        # until now it left no trace at all. See corridor_miss_report.
+        logger.info(
+            "booking rejected outside service area: %s",
+            corridor_miss_report(
+                db,
+                payload.pickup_lat,
+                payload.pickup_lng,
+                payload.dropoff_lat,
+                payload.dropoff_lng,
+            ),
+        )
         raise OutsideServiceAreaError(
             "pickup/dropoff do not sit on any active corridor"
         )
