@@ -45,7 +45,7 @@ from app.services.trip_state import (
     VEHICLE_COMMITTED_STATUSES,
     apply_transition,
 )
-from app.services.vehicle_return import send_idle_vehicles_home
+from app.services.vehicle_return import home_base_of, send_idle_vehicles_home
 from app.services.dispatch_engine import (
     PoolSnapshot,
     SealDecision,
@@ -222,6 +222,17 @@ def _refresh_pool_geometry(db: Session, trip: Trip) -> None:
             if as_utc(vehicle.last_location_at) >= stale_cutoff:
                 pos = to_shape(vehicle.last_location)
                 vehicle_position = (pos.y, pos.x)
+
+        # No usable fix, but a car IS committed to this trip. It is
+        # almost certainly sitting at base — that is where every car
+        # starts its day and waits between runs. Anchoring there beats
+        # the alternative, which is letting the search start at
+        # whichever stop happens to be cheapest and silently modelling a
+        # car that teleported to its first pickup. A driver whose phone
+        # stopped reporting should still get a sensible pickup order,
+        # not a route planned from nowhere.
+        if vehicle_position is None and vehicle is not None:
+            vehicle_position = home_base_of(db, vehicle)
 
     if len(members) == 1:
         m = members[0]
