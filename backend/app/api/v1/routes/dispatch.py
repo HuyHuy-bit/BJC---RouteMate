@@ -164,7 +164,6 @@ def _load_trip(db: Session, trip_id: uuid.UUID) -> Trip:
 
 @router.post("/run", response_model=MatchingRunResult)
 def run_dispatch(
-    radius_meters: float = 3000,  # retained for API compatibility; unused
     db: Session = Depends(get_db),
     current_user: User = Depends(require_role(UserRole.admin, UserRole.dispatcher)),
 ):

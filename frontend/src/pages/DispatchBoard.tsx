@@ -27,10 +27,6 @@ import SlideOver from "../components/ui/SlideOver";
 import { useToast } from "../components/ui/Toast";
 import { getErrorMessage } from "../lib/errors";
 
-// Fixed rather than dispatcher-adjustable — 15km covers this business's
-// service area without putting a technical knob in an operational UI.
-const MAX_DETOUR_METERS = 15000;
-
 type Filter = "all" | BookingStatus;
 
 const FILTERS: { value: Filter; label: string }[] = [
@@ -108,7 +104,7 @@ export default function DispatchBoard() {
   const runMatching = async () => {
     setRunning(true);
     try {
-      const result = await api.dispatch.run(MAX_DETOUR_METERS);
+      const result = await api.dispatch.run();
       toast(
         result.trips_created > 0
           ? `Đã ghép ${result.trips_created} xe.`

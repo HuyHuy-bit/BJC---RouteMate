@@ -78,12 +78,8 @@ export const api = {
       apiClient.post<BookingOut>(`/bookings/${id}/unassign`).then((r) => r.data),
   },
   dispatch: {
-    run: (radiusMeters = 3000) =>
-      apiClient
-        .post<MatchingRunResult>("/dispatch/run", null, {
-          params: { radius_meters: radiusMeters },
-        })
-        .then((r) => r.data),
+    run: () =>
+      apiClient.post<MatchingRunResult>("/dispatch/run", null).then((r) => r.data),
     trips: () =>
       apiClient.get<TripOut[]>("/dispatch/trips").then((r) => r.data),
     myTrips: () =>
