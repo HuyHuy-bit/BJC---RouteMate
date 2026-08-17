@@ -25,8 +25,10 @@ import { getErrorMessage } from "../lib/errors";
 // backend's TripExtendWait default.
 const EXTEND_MINUTES = 20;
 
+// No entry for merge_with_nearby_pool: the dispatch cycle exhausts that
+// option automatically before a pool ever reaches this panel, so the
+// backend no longer offers it. See evaluate_pool in dispatch_engine.py.
 const OPTION_LABEL: Record<string, string> = {
-  merge_with_nearby_pool: "Gộp với chuyến gần đó",
   offer_extended_wait: "Chờ thêm khách",
   offer_private_upgrade: "Đề nghị bao xe riêng",
   dispatch_at_loss: "Vẫn cho xe chạy dù chưa đủ khách",

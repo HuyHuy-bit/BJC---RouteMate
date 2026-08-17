@@ -143,8 +143,15 @@ def evaluate_pool(
         # after the trip is finished, so a booking that never runs has
         # no money to give back. The old label implied a refund step
         # that doesn't exist in this business.
+        # Deliberately NOT offering "merge with a nearby pool" here:
+        # run_dispatch_cycle already tries exactly that on every tick,
+        # with a real route solve behind it (can_merge_pools), and
+        # merges the moment it is viable. A pool only reaches a human
+        # BECAUSE that attempt just failed — so listing it as a
+        # dispatcher option describes a door the system already found
+        # locked. Every option below is a decision only a person can
+        # make, usually after phoning the customer.
         options=[
-            "merge_with_nearby_pool",
             "offer_extended_wait",
             "offer_private_upgrade",
             "dispatch_at_loss",
