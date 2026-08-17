@@ -48,6 +48,7 @@ class FakeBooking:
     requested_pickup_at: datetime = datetime(2026, 7, 25, 8, tzinfo=timezone.utc)
     estimated_pickup_at: datetime | None = None
     estimated_dropoff_at: datetime | None = None
+    stop_order: int | None = None
     direction: str = "outbound"
     trip_id: UUID | None = None
     payment: object | None = None

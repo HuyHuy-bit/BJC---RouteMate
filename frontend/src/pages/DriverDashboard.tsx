@@ -61,10 +61,41 @@ const ISSUE_REASONS: { value: TripReportIssueReason; label: string }[] = [
  * in the UI. Bookings without an ETA yet sort last on requested
  * time rather than being silently dropped into position zero.
  */
+/**
+ * Collection order.
+ *
+ * `stop_order` is the sequence the route solver actually chose, worked
+ * out from where the car is starting and what each detour costs — so it
+ * wins whenever the backend has computed it. Sorting by time is the
+ * fallback for a pool not yet solved; it usually agrees, because the
+ * ETAs are derived from the solved route, but it is a proxy and this is
+ * the real thing.
+ */
 function orderedStops(bookings: BookingOut[]): BookingOut[] {
   return [...bookings].sort((a, b) => {
+    if (a.stop_order != null && b.stop_order != null) {
+      return a.stop_order - b.stop_order;
+    }
     const at = a.estimated_pickup_at ?? a.requested_pickup_at;
     const bt = b.estimated_pickup_at ?? b.requested_pickup_at;
+    if (at === bt) return 0;
+    return at < bt ? -1 : 1;
+  });
+}
+
+/**
+ * Delivery order — which is NOT the collection order reversed. The
+ * solver interleaves pickups and dropoffs to keep everyone inside their
+ * detour allowance, so the passenger collected first is often not the
+ * one delivered first. The backend has always computed this sequence;
+ * the driver's screen simply never showed it, leaving them to work out
+ * the second half of their own route.
+ */
+function orderedDropoffs(bookings: BookingOut[]): BookingOut[] {
+  return [...bookings].sort((a, b) => {
+    const at = a.estimated_dropoff_at;
+    const bt = b.estimated_dropoff_at;
+    if (at == null || bt == null) return 0;
     if (at === bt) return 0;
     return at < bt ? -1 : 1;
   });
@@ -243,6 +274,7 @@ function TripCard({
     .filter((a): a is NonNullable<typeof a> => a !== undefined);
   const direction = trip.bookings[0]?.direction;
   const stops = orderedStops(trip.bookings);
+  const dropoffs = orderedDropoffs(trip.bookings);
   const canReportIssue = trip.status === "assigned" || trip.status === "in_progress";
 
   // Periodic location ping while this vehicle is actually out on a
@@ -328,6 +360,9 @@ function TripCard({
         <Badge tone={status.tone}>{status.label}</Badge>
       </header>
 
+      <p className="px-4 pt-3 text-2xs font-semibold uppercase tracking-wide text-faint">
+        Đón khách
+      </p>
       <ol className="divide-y divide-line">
         {stops.map((b, i) => (
           <BookingRow
@@ -340,6 +375,41 @@ function TripCard({
           />
         ))}
       </ol>
+
+      {/* The second half of the run. The solver decides this order too,
+          and it is rarely just the pickup list reversed — without it a
+          driver arriving in Hà Nội with three passengers has to work
+          out the delivery sequence themselves at the wheel. Shown only
+          for real shared runs: with one passenger there is no sequence
+          to communicate, and the row above already says where they go. */}
+      {dropoffs.length > 1 && (
+        <>
+          <p className="px-4 pt-3 text-2xs font-semibold uppercase tracking-wide text-faint border-t border-line">
+            Trả khách
+          </p>
+          <ol className="px-4 pb-3 pt-1 space-y-1.5">
+            {dropoffs.map((b, i) => (
+              <li key={b.id} className="flex items-start gap-2.5 text-sm">
+                <span
+                  className="w-5 h-5 rounded-full bg-sunken text-2xs font-semibold flex items-center justify-center shrink-0 mt-0.5 tnum"
+                  aria-hidden="true"
+                >
+                  {i + 1}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="font-medium">{b.customer.full_name}</span>
+                  <span className="text-muted"> · {b.dropoff_address}</span>
+                </span>
+                {b.estimated_dropoff_at && (
+                  <span className="shrink-0 text-xs text-faint tnum">
+                    {fmtTime(b.estimated_dropoff_at)}
+                  </span>
+                )}
+              </li>
+            ))}
+          </ol>
+        </>
+      )}
 
       {(actions.length > 0 || canReportIssue) && (
         <div className="p-4 border-t border-line bg-sunken space-y-2">

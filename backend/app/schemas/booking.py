@@ -49,6 +49,12 @@ class BookingOut(BaseModel):
     # route is actually solved.
     estimated_pickup_at: datetime | None
     estimated_dropoff_at: datetime | None
+    # Where this booking sits in the driver's collection sequence, as
+    # chosen by the route solver from the car's actual starting point.
+    # Null until the pool seals. Exposed so the driver's screen can show
+    # the order the solver picked rather than re-deriving it from ETAs,
+    # which is only a proxy for it.
+    stop_order: int | None = None
     direction: BookingDirection
     is_private: bool
     seats: int

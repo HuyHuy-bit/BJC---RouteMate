@@ -187,6 +187,7 @@ def to_booking_out(booking: Booking, actor: User | None = None) -> BookingOut:
         requested_pickup_at=booking.requested_pickup_at,
         estimated_pickup_at=booking.estimated_pickup_at,
         estimated_dropoff_at=booking.estimated_dropoff_at,
+        stop_order=booking.stop_order,
         direction=booking.direction,
         is_private=booking.is_private,
         seats=booking.seats,

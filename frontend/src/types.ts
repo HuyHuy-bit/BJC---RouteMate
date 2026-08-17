@@ -105,6 +105,12 @@ export interface BookingOut {
   requested_pickup_at: string;
   estimated_pickup_at: string | null;
   estimated_dropoff_at: string | null;
+  /**
+   * Position in the driver's collection sequence, chosen by the route
+   * solver from where the car actually starts. Null until the pool
+   * seals and a route is solved.
+   */
+  stop_order: number | null;
   direction: BookingDirection;
   is_private: boolean;
   seats: number;
