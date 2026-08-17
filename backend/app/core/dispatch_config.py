@@ -33,7 +33,15 @@ VEHICLE_LOCATION_STALE_MINUTES = 10
 # bucketing, which wrongly matched 06:00 with 22:00 and wrongly refused
 # to match 23:50 with 00:10. This is the absolute ceiling — never
 # exceeded regardless of anything else.
-PICKUP_WINDOW_MINUTES = 45
+#
+# Note this ceiling is NOT the limit you will observe in practice. The
+# per-passenger detour cap below binds first: whoever boards earliest
+# sits in the car for the whole gap, and that time counts against their
+# own detour allowance. Measured end to end, two otherwise-identical
+# bookings stop being poolable around 20 minutes apart. This number was
+# lowered 45 -> 30 so the config stops advertising a window the system
+# will not actually honour.
+PICKUP_WINDOW_MINUTES = 30
 
 # How close pickup times need to be to count as "the same wave" of
 # demand for the periodic re-clustering pass (see reclustering.py) —
@@ -56,7 +64,13 @@ LATE_PICKUP_TOLERANCE_MINUTES = 15
 
 # How long a forming pool waits for more passengers before it must decide
 # to depart or escalate.
-MAX_POOL_WAIT_MINUTES = 45
+#
+# Lowered 45 -> 30 by operator decision, for punctuality. Worth knowing
+# what it costs: a round trip on this corridor needs roughly 3 paid
+# seats to break even, and cutting the fill window by a third gives a
+# pool fewer chances to reach that. If average seats per trip falls
+# after this change, this is the first knob to put back.
+MAX_POOL_WAIT_MINUTES = 30
 
 # --- Rush hour ---
 # Peak doesn't change how long a pool WAITS to fill — it changes how
