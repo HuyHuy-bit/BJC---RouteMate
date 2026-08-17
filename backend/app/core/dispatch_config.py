@@ -121,7 +121,23 @@ MAX_ACCEPTABLE_SCORE = 0.75
 # within this far off that corridor's hub-to-hub line. Beyond this, it's
 # not "on" the corridor, it's a different trip entirely — better to
 # reject with a clear "outside service area" than silently guess.
-MAX_CORRIDOR_DEVIATION_METERS = 20_000
+#
+# Two values, interpolated along the route by
+# geo.corridor_deviation_limit_m rather than switched at the midpoint.
+# The home hub end is wider because that is where the tolerance actually
+# binds: sparse rural roads, houses set back from the highway, and
+# landmark-approximate pickup pins that a strict boundary turns into
+# wrongly-rejected real customers.
+#
+# The away hub value is deliberately UNCHANGED from the single 20 km
+# tolerance these replace. This pass only ever loosens: interpolating
+# between 20 km and 28 km can never produce anything under 20 km, so no
+# booking accepted before this change is rejected after it. Tightening
+# the Hà Nội end may well be right, but not before there is data —
+# nothing today records how far off-corridor a rejected booking actually
+# was, so any narrower number would be a guess that costs real fares.
+MAX_CORRIDOR_DEVIATION_HOME_HUB_METERS = 28_000
+MAX_CORRIDOR_DEVIATION_AWAY_HUB_METERS = 20_000
 
 # --- Minimum viable pool size, by direction ---
 # Outbound must fill seats to be worth running. Return dispatches solo

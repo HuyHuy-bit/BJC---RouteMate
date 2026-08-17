@@ -66,6 +66,33 @@ def project_onto_corridor(
     return t, perp_m
 
 
+def corridor_deviation_limit_m(
+    t: float, home_hub_limit_m: float, away_hub_limit_m: float
+) -> float:
+    """
+    How far off the corridor line a point at position `t` may sit and
+    still belong to it. `t` is project_onto_corridor's along-line scalar:
+    0.0 at the away hub, 1.0 at the home hub, outside that range beyond
+    an endpoint (clamped here).
+
+    One tolerance could not serve both ends. The home hub (Bắc Giang)
+    end has a sparse road grid and housing set well back from the
+    highway, so coverage matters more than precision there. The away hub
+    (Hà Nội) end is dense enough that a modest radius still finds
+    matches, and a wide one only invites slow, unpredictable in-city
+    detours.
+
+    Interpolated rather than switched at the midpoint on purpose. A step
+    would drop a cliff over Bắc Ninh and Từ Sơn, where a few hundred
+    metres of GPS imprecision would swing the allowance by kilometres —
+    the same shape of failure classify_direction below records having
+    already happened once, in those same towns. Passing equal limits
+    reproduces the old single-threshold behavior exactly.
+    """
+    ratio = min(1.0, max(0.0, t))
+    return away_hub_limit_m + (home_hub_limit_m - away_hub_limit_m) * ratio
+
+
 def classify_direction(
     corridor,
     pickup_lat: float,

@@ -12,9 +12,12 @@ whichever active corridor's hub-to-hub line the booking sits closest to
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
-from app.core.dispatch_config import MAX_CORRIDOR_DEVIATION_METERS
+from app.core.dispatch_config import (
+    MAX_CORRIDOR_DEVIATION_AWAY_HUB_METERS,
+    MAX_CORRIDOR_DEVIATION_HOME_HUB_METERS,
+)
 from app.models.corridor import Corridor
-from app.services.geo import project_onto_corridor
+from app.services.geo import corridor_deviation_limit_m, project_onto_corridor
 
 
 def find_corridor_for_points(
@@ -36,12 +39,32 @@ def find_corridor_for_points(
     for corridor in corridors:
         origin = (corridor.away_hub_lat, corridor.away_hub_lng)
         dest = (corridor.home_hub_lat, corridor.home_hub_lng)
-        _, pickup_dev = project_onto_corridor(pickup_lat, pickup_lng, origin, dest)
-        _, dropoff_dev = project_onto_corridor(dropoff_lat, dropoff_lng, origin, dest)
-        deviation = max(pickup_dev, dropoff_dev)
+        pickup_t, pickup_dev = project_onto_corridor(
+            pickup_lat, pickup_lng, origin, dest
+        )
+        dropoff_t, dropoff_dev = project_onto_corridor(
+            dropoff_lat, dropoff_lng, origin, dest
+        )
 
-        if deviation > MAX_CORRIDOR_DEVIATION_METERS:
+        # Each end is judged against the tolerance for where it actually
+        # sits, so a rural Bắc Giang pickup isn't held to a city radius.
+        over_tolerance = any(
+            dev
+            > corridor_deviation_limit_m(
+                t,
+                MAX_CORRIDOR_DEVIATION_HOME_HUB_METERS,
+                MAX_CORRIDOR_DEVIATION_AWAY_HUB_METERS,
+            )
+            for t, dev in ((pickup_t, pickup_dev), (dropoff_t, dropoff_dev))
+        )
+        if over_tolerance:
             continue
+
+        # Ranking between corridors still uses raw deviation: "which
+        # corridor is this booking most on" is a different question from
+        # "is it on this one at all", and folding per-end tolerances into
+        # the comparison would make it incomparable across corridors.
+        deviation = max(pickup_dev, dropoff_dev)
         if best_deviation is None or deviation < best_deviation:
             best, best_deviation = corridor, deviation
 

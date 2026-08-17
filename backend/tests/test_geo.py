@@ -10,7 +10,11 @@ showing every Bắc Giang -> Hà Nội booking backwards.
 """
 
 from app.models.corridor import Corridor
-from app.services.geo import classify_direction, project_onto_corridor
+from app.services.geo import (
+    classify_direction,
+    corridor_deviation_limit_m,
+    project_onto_corridor,
+)
 
 BAC_GIANG = (21.2731, 106.1946)
 HA_NOI = (21.0285, 105.8542)
@@ -74,3 +78,67 @@ def test_classify_direction_midpoint_town_moving_toward_home_is_return():
     bac_ninh_ish = (21.15, 106.05)
     direction = classify_direction(CORRIDOR, *bac_ninh_ish, *BAC_GIANG)
     assert direction == "return"
+
+
+# -- endpoint-aware deviation tolerance -------------------------------
+
+# The single symmetric tolerance these two values replace, kept as the
+# floor every interpolated result must clear. See
+# test_no_point_gets_a_tighter_tolerance_than_before.
+LEGACY_SYMMETRIC_LIMIT_M = 20_000
+
+
+def test_deviation_limit_is_the_away_hub_value_at_the_away_hub():
+    t, _ = project_onto_corridor(*HA_NOI, HA_NOI, BAC_GIANG)
+    limit = corridor_deviation_limit_m(
+        t, home_hub_limit_m=28_000, away_hub_limit_m=20_000
+    )
+    assert abs(limit - 20_000) < 1.0
+
+
+def test_deviation_limit_is_the_home_hub_value_at_the_home_hub():
+    t, _ = project_onto_corridor(*BAC_GIANG, HA_NOI, BAC_GIANG)
+    limit = corridor_deviation_limit_m(
+        t, home_hub_limit_m=28_000, away_hub_limit_m=20_000
+    )
+    assert abs(limit - 28_000) < 1.0
+
+
+def test_deviation_limit_has_no_cliff_at_the_corridor_midpoint():
+    # The midpoint is Bắc Ninh / Từ Sơn country. A step function here
+    # would swing the allowance by kilometres on a few hundred metres of
+    # GPS noise — the same shape of bug classify_direction's docstring
+    # records for exactly these towns. Two points a hair either side of
+    # the middle must get near-identical tolerances.
+    just_below = corridor_deviation_limit_m(0.499, 28_000, 20_000)
+    just_above = corridor_deviation_limit_m(0.501, 28_000, 20_000)
+    assert abs(just_above - just_below) < 50.0
+
+
+def test_deviation_limit_is_clamped_beyond_both_endpoints():
+    # project_onto_corridor returns t outside [0, 1] for points past an
+    # endpoint. Those must pin to the nearer hub's limit rather than
+    # extrapolate into a nonsense tolerance.
+    assert corridor_deviation_limit_m(-3.0, 28_000, 20_000) == 20_000
+    assert corridor_deviation_limit_m(4.0, 28_000, 20_000) == 28_000
+
+
+def test_no_point_gets_a_tighter_tolerance_than_before():
+    # The loosen-only invariant this change ships under: with the away
+    # hub pinned at today's symmetric value, no position along the
+    # corridor may come out stricter than today. A booking accepted
+    # before this change must still be accepted after it.
+    for i in range(-20, 121):
+        t = i / 100.0
+        limit = corridor_deviation_limit_m(
+            t, home_hub_limit_m=28_000, away_hub_limit_m=LEGACY_SYMMETRIC_LIMIT_M
+        )
+        assert limit >= LEGACY_SYMMETRIC_LIMIT_M, (
+            f"t={t} got {limit}m, tighter than the {LEGACY_SYMMETRIC_LIMIT_M}m "
+            "tolerance it replaces"
+        )
+
+
+def test_equal_limits_reproduce_the_old_symmetric_behavior_exactly():
+    for t in (-1.0, 0.0, 0.25, 0.5, 0.75, 1.0, 2.0):
+        assert corridor_deviation_limit_m(t, 20_000, 20_000) == 20_000
