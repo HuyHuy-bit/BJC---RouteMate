@@ -27,6 +27,9 @@ docker-compose.override.yml
 .claude/
 docs/superpowers/
 
+# graphify knowledge-graph output (regenerate locally with `graphify .`)
+graphify-out/
+
 # os
 .DS_Store
 

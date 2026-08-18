@@ -49,6 +49,16 @@ xeghep/
 
 ## Status
 
-Project skeleton — architecture and scaffolding only. Business logic
-(auth, bookings, matching algorithm, geocoding integration) is built next,
-module by module, on top of this structure.
+Beta — the full pipeline runs end to end: auth and roles, customer and
+booking intake, geocoding, corridor matching, automatic pooling, exact
+stop-order solving, vehicle assignment, the driver-facing trip workflow,
+payments, and notifications.
+
+Dispatch is **autonomous**, not button-driven: `app/services/scheduler.py`
+runs a dispatch cycle on a timer and decides per pool whether to depart,
+keep waiting, or escalate. `POST /dispatch/run` still exists for manual
+and test runs.
+
+Known gaps: deployment target is undecided (see `docs/ARCHITECTURE.md`
+§7), and stop order is solved at seal/assign time rather than
+re-optimized while a car is en route.

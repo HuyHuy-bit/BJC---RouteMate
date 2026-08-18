@@ -29,11 +29,13 @@ proximity on the actual road network. PostGIS gives us:
 - `ST_Distance` — real great-circle distance for sorting/scoring candidates
 - A GiST spatial index so these queries stay fast as the bookings table grows
 
-Straight-line distance is still an approximation of drive time (a river or
-highway can make two "close" points a long drive apart) — a later iteration
-can call Goong's **Distance Matrix API** to score candidate groups by actual
-drive time instead of straight-line distance, once volume justifies the
-extra API calls.
+Straight-line distance is only an approximation of drive time (a river or
+highway can make two "close" points a long drive apart), so it is now used
+strictly as a cheap coarse pre-filter. Everything that actually decides a
+match — insertion cost, stop order, ETAs, the detour guarantee — runs on
+real road durations from Goong's **Distance Matrix API**, fetched through
+`app/services/routing.py` (cached, batched, circuit-broken, and flagged
+`is_estimate` when it falls back to haversine).
 
 ## 3. Backend module layout
 
@@ -47,14 +49,30 @@ backend/app/
 ├── db/
 │   ├── session.py           SQLAlchemy engine + session factory
 │   └── base.py               Declarative base, shared mixins (timestamps, etc.)
-├── models/                  SQLAlchemy ORM models (Customer, Booking, Trip, User)
+├── models/                  SQLAlchemy ORM models (Customer, Booking, Trip,
+│                               User, Vehicle, Corridor, Payment, ...)
 ├── schemas/                 Pydantic request/response schemas
 ├── services/
-│   ├── geocoding.py          Goong Maps API client (address → lat/lng)
-│   └── matching.py           The clustering algorithm, now running as a real
-│                               PostGIS query instead of in-memory pixel math
+│   ├── geocoding.py          Goong Maps client (address → lat/lng)
+│   ├── routing.py            The one gateway to Goong routing — caching,
+│   │                           batching, circuit breaking, honest fallback
+│   ├── geo.py                Pure corridor projection math (no DB session)
+│   ├── corridors.py          Matches a booking's points to its corridor
+│   ├── dispatch_service.py   Orchestration: pool selection, geometry
+│   │                           refresh, assignment, ETAs
+│   ├── pool_insertion.py     Should this rider join this pool, and in what
+│   │                           stop order (feasibility + scoring)
+│   ├── route_solver.py       Exact pickup-and-delivery ordering (§5)
+│   ├── reclustering.py       Re-groups still-forming pools
+│   ├── dispatch_engine.py    Per-tick decision: depart, wait, or escalate
+│   ├── scheduler.py          Runs the dispatch cycle on a timer
+│   ├── traffic.py            Rush-hour travel-time multiplier
+│   ├── trip_state.py         The trip state machine + who may move it
+│   ├── vehicle_return.py     Getting cars back to their home hub
+│   └── ...                   booking/customer/notification/payment/audit
 └── api/v1/routes/           One file per resource: auth, customers, bookings,
-                               dispatch, vehicles
+                               dispatch, vehicles, payments, notifications,
+                               geocode, admin
 ```
 
 ## 4. Core domain model (initial pass)
@@ -74,36 +92,98 @@ backend/app/
 
 ## 5. Matching algorithm (as built)
 
-Greedy clustering over `queued` bookings, grouped by requested pickup date
-first (a booking for tomorrow is never compared against one for today).
-Implementation: `app/services/matching.py` + `app/services/route_solver.py`.
+Two decisions, deliberately kept separate because they have different
+shapes: **who shares a car** (greedy, incremental) and **what order the
+car visits stops in** (exact, re-solved for the whole group).
 
-- Runs on a manual trigger (`POST /dispatch/run`) for now — a scheduled
-  job (e.g. every 15 min) is the natural next step once this is running
-  for real, matching the actual "batch until enough riders" business rule
-- Clustering happens in Python over bookings pulled from Postgres, not as
-  a single SQL query — at the volume this business runs (tens of bookings
-  per batch), this is simpler to read and modify than an equivalent
-  recursive SQL query. Worth revisiting with SQL-side `ST_DWithin`
-  pre-filtering only if batch sizes grow into the hundreds.
-- The acceptance criterion for adding a rider to a forming group is
-  **marginal route insertion cost**: the group's actual optimal route
-  (see below) is solved with and without the candidate, and they're only
-  added if the increase stays under the configured max-detour threshold.
-  This is a meaningfully better signal than raw pickup/dropoff proximity
-  — two riders can have close pickups and close dropoffs while still
-  being a bad match if combining them forces the car to backtrack.
-- Route ordering is solved exactly, not approximated: for each finalized
-  group (≤4 riders, ≤8 stops), every valid stop sequence respecting
-  "pickup before that rider's own dropoff" is enumerated via backtracking
-  (at most (2n)!/2^n orderings, ≤2520 at n=4) and the shortest one wins.
-  This is real optimization, not a heuristic — cheap enough to brute-force
-  exactly at this scale.
-- No external API calls in the matching path — everything is haversine
-  geometry on coordinates already in Postgres. Real road distance/drive
-  time (via Goong's Distance Matrix API) would be more accurate but costs
-  API calls and adds latency; noted as a possible future upgrade, not
-  currently worth the cost at this business's scale.
+Tunable constants live in `app/core/dispatch_config.py`, except a few
+local to the module that uses them.
+
+### 5.1 Membership — greedy
+
+`app/services/pool_insertion.py::evaluate_insertion` scores one candidate
+booking against one existing forming pool and returns feasibility plus a
+0..1 score where **lower is better** (weighted: added distance 0.28,
+worst detour 0.24, pickup wait 0.20, occupancy 0.18, deadline pressure
+0.10; rejected above `MAX_ACCEPTABLE_SCORE`). The booking joins the
+best-scoring feasible pool.
+
+- The acceptance criterion is **marginal route insertion cost**, not raw
+  proximity: the pool's actual optimal route is solved with and without
+  the candidate. Two riders can have close pickups and close dropoffs and
+  still be a bad match if combining them forces the car to backtrack.
+- Haversine (`COARSE_PREFILTER_METERS`, in `pool_insertion.py`) is a
+  cheap pre-filter only — it
+  discards obvious non-candidates before any API call. Every number that
+  decides the match is a real road duration.
+- Scoring deliberately makes no Directions call, saving one API request
+  per candidate evaluated.
+- Greedy means earlier grouping choices are never revisited.
+  `app/services/reclustering.py` is the counterweight: it re-groups pools
+  that are still `forming`, time-first and distance-second.
+
+### 5.2 Stop order — exact, and re-solved
+
+`app/services/route_solver.py::solve_pdp` is the shared core. This is a
+**pickup-and-delivery problem, not a TSP**: each rider has a pickup and a
+dropoff, the only hard precedence is that a rider is picked up before
+their own dropoff, and stops from different riders interleave freely.
+
+- For n riders there are 2n stops and `(2n)!/2^n` valid orderings —
+  at most **2520** at the 4 seats this app allows. Cheap to solve
+  exactly by constrained backtracking with branch-and-bound, and far
+  cheaper in practice. Invalid orderings are never generated, so unlike
+  a capped raw-permutation search this cannot be silently truncated.
+- Two schedule constraints are pruned **inside** the search rather than
+  validated afterwards, so an infeasible branch is abandoned instead of
+  producing a "best" route that then gets thrown away:
+  - pickup lands within `EARLY_PICKUP_TOLERANCE_MINUTES` /
+    `LATE_PICKUP_TOLERANCE_MINUTES` of the requested time (arriving early
+    costs a real wait that carries forward into every later stop);
+  - no rider's in-car time exceeds their solo baseline by more than
+    `MAX_PASSENGER_DETOUR_MINUTES`.
+- Rush hour (`app/services/traffic.py`) scales route legs **and** the
+  solo baseline they are compared against. Scaling one side only would
+  make "detour = in-car minus solo" meaningless.
+- The solver's per-stop arrival offsets are the single source of truth
+  for the ETAs written to bookings — pickup and dropoff both.
+
+**Vehicle anchoring.** Once a specific car is committed,
+`best_ordering_from_position` prices the deadhead leg (car → first stop)
+into the objective via `start_cost`, so the approach direction shapes the
+chosen order instead of being invisible to it. The live GPS fix is used
+only if newer than `VEHICLE_LOCATION_STALE_MINUTES`; otherwise the search
+anchors at the vehicle's corridor home base. Anchoring at a stale-but-real
+base beats letting the search start at whichever stop is cheapest, which
+silently models a car that teleported to its first pickup.
+
+**When it re-solves.** `_refresh_pool_geometry` throws the previous order
+away and re-solves the entire group from scratch — never an incremental
+patch — whenever pool membership or the assigned vehicle changes (booking
+joins, leaves, is cancelled or removed; seal; vehicle assigned or
+reassigned; trips merged; reclustering). A `solved_booking_ids` /
+`solved_vehicle_id` snapshot on `Trip` short-circuits the work when
+nothing has actually changed.
+
+A car simply *moving* changes neither, so the order is **not**
+continuously re-optimized in flight: it is solved at seal/assign time and
+then held. That is a deliberate trade — live re-solving would mean a
+Distance Matrix call per position update and a stop list that reshuffles
+under the driver mid-route — but it does mean a significant post-assignment
+deviation currently goes unnoticed.
+
+### 5.3 Triggering
+
+The cycle runs on a timer (`app/services/scheduler.py`, every
+`DISPATCH_TICK_SECONDS` during operating hours), and per tick
+`app/services/dispatch_engine.py` answers one question for each forming
+pool: depart now, keep waiting, or escalate. Seal triggers in priority
+order are full car → deadline with enough passengers → deadline on a
+return leg (the car drives home regardless, so a single passenger still
+departs) → deadline, outbound, one passenger, which is escalated
+explicitly rather than silently stranded.
+
+`POST /dispatch/run` remains for manual and test runs.
 
 ## 6. Auth & roles
 
